@@ -277,12 +277,10 @@ run_mirror() {
   # Run rsync, process output line by line
   TRANSFER_COUNT=0
   ERROR_COUNT=0
-  set +o pipefail
-  rsync "${rsync_args[@]}" 2>&1 | while IFS= read -r line; do
+  while IFS= read -r line; do
     process_output_line "$line"
-  done
-  MIRROR_EXIT_CODE=${PIPESTATUS[0]}
-  set -o pipefail
+  done < <(rsync "${rsync_args[@]}" 2>&1)
+  MIRROR_EXIT_CODE=$?
 
   printf '\n\n'  # newline after progress bar
 
