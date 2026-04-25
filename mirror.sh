@@ -281,7 +281,7 @@ run_mirror() {
   tmprc=$(mktemp) || { MIRROR_EXIT_CODE=0; return; }
   while IFS= read -r line; do
     process_output_line "$line"
-  done < <(rsync "${rsync_args[@]}" 2>&1; echo $? > "$tmprc")
+  done < <(set +e; rsync "${rsync_args[@]}" 2>&1; echo $? > "$tmprc")
   MIRROR_EXIT_CODE=$(cat "$tmprc" 2>/dev/null || echo 0)
   rm -f "$tmprc"
 
