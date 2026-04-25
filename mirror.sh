@@ -325,6 +325,7 @@ run_mirror() {
   # Build rsync argument list
   local rsync_args=(
     --archive
+    --no-specials
     --delete
     --human-readable
     --progress
