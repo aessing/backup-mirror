@@ -40,10 +40,10 @@ assert_contains "select_run_mode is a function" "$(type select_run_mode 2>&1)" "
 
 echo "=== build_exclude_args ==="
 OUTPUT=$(build_exclude_args)
-assert_contains "excludes iCloud" "$OUTPUT" "Library/Mobile Documents/"
-assert_contains "excludes Caches" "$OUTPUT" "Library/Caches/"
-assert_contains "excludes Trash" "$OUTPUT" ".Trash/"
-assert_contains "excludes Developer" "$OUTPUT" "Library/Developer/"
+assert_contains "excludes iCloud" "$OUTPUT" "Library/Mobile Documents"
+assert_contains "excludes Caches" "$OUTPUT" "Library/Caches"
+assert_contains "excludes Trash" "$OUTPUT" ".Trash"
+assert_contains "excludes Developer" "$OUTPUT" "Library/Developer"
 # Count excludes: should be 11
 COUNT=$(echo "$OUTPUT" | grep -c '\-\-exclude' || true)
 assert_eq "has 11 excludes" "$COUNT" "11"

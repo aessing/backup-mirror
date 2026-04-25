@@ -131,7 +131,7 @@ select_run_mode() {
 
 build_exclude_args() {
   for path in "${EXCLUDES[@]}"; do
-    printf '%s\n' "--exclude=${path}"
+    printf '%s\n' "--exclude=${path%/}"
   done
 }
 count_source_files() {
@@ -144,26 +144,26 @@ count_source_files() {
   find_args+=(-type f -print)
 
   local tmpfile
-  tmpfile=$(mktemp)
+  tmpfile=$(mktemp) || { echo 0; return; }
 
   find "${find_args[@]}" 2>/dev/null | wc -l | tr -d ' ' > "$tmpfile" &
-  local find_pid=$!
+  local pipe_pid=$!  # PID of tr (last in pipeline); killing it cascades SIGPIPE to wc and find
 
   local waited=0
-  while kill -0 "$find_pid" 2>/dev/null && [[ $waited -lt 3 ]]; do
+  while kill -0 "$pipe_pid" 2>/dev/null && [[ $waited -lt 3 ]]; do
     sleep 1
     ((++waited)) || true
   done
 
-  if kill -0 "$find_pid" 2>/dev/null; then
-    kill "$find_pid" 2>/dev/null || true
-    wait "$find_pid" 2>/dev/null || true
+  if kill -0 "$pipe_pid" 2>/dev/null; then
+    kill "$pipe_pid" 2>/dev/null || true
+    wait "$pipe_pid" 2>/dev/null || true
     rm -f "$tmpfile"
     echo 0
     return
   fi
 
-  wait "$find_pid" 2>/dev/null || true
+  wait "$pipe_pid" 2>/dev/null || true
   local count
   count=$(cat "$tmpfile" 2>/dev/null | tr -d ' \n' || echo 0)
   rm -f "$tmpfile"
