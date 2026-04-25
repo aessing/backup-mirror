@@ -218,7 +218,88 @@ process_output_line() {
     printf '  %s%s%s\n' "$GRAY" "$line" "$R"
   fi
 }
-run_mirror()         { true; }
+run_mirror() {
+  local dest="$1"   # e.g. /Volumes/Disk/Home Folder Backup
+  local mode="$2"   # "dry" or "live"
+
+  LOG_FILE="${dest}/mirror.log"
+  local source="$HOME/"
+
+  # Ensure destination exists
+  if ! mkdir -p "$dest" 2>/dev/null; then
+    printf '%s✖  Cannot create destination: %s%s\n' "$RED" "$dest" "$R"
+    exit 1
+  fi
+
+  # Count source files for progress display (with timeout)
+  printf '%s  Counting source files…%s' "$GRAY" "$R"
+  TOTAL_FILES=$(count_source_files "$HOME")
+  printf '\r\033[K'  # clear the counting line
+
+  # Write log header
+  {
+    printf '\n════════════════════════════════════════════\n'
+    printf 'Run started:  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf 'Mode:         %s\n' "$mode"
+    printf 'Destination:  %s\n' "$dest"
+    printf 'Source files: %s\n' "$TOTAL_FILES"
+    printf '════════════════════════════════════════════\n'
+  } >> "$LOG_FILE"
+
+  # Build rsync argument list
+  local rsync_args=(
+    --archive
+    --delete
+    --human-readable
+    --progress
+    --stats
+  )
+  [[ "$mode" == "dry" ]] && rsync_args+=(--dry-run)
+
+  # Add exclusions
+  while IFS= read -r excl; do
+    rsync_args+=("$excl")
+  done < <(build_exclude_args)
+
+  rsync_args+=("$source" "$dest/")
+
+  # Print progress header
+  printf '\n'
+  sep
+  if [[ "$mode" == "dry" ]]; then
+    printf '%s⠸  Dry run — no files will be written%s\n' "$YELLOW" "$R"
+  else
+    printf '%s⠸  Mirroring home folder…%s\n' "$BLUE" "$R"
+  fi
+  sep
+  printf '\n'
+
+  # Run rsync, process output line by line
+  TRANSFER_COUNT=0
+  ERROR_COUNT=0
+  set +o pipefail
+  rsync "${rsync_args[@]}" 2>&1 | while IFS= read -r line; do
+    process_output_line "$line"
+  done
+  MIRROR_EXIT_CODE=${PIPESTATUS[0]}
+  set -o pipefail
+
+  printf '\n\n'  # newline after progress bar
+
+  # Write log footer
+  local end_time
+  end_time=$(date +%s)
+  local duration=$(( end_time - START_TIME ))
+  {
+    printf '\n────────────────────────────────────────────\n'
+    printf 'Run ended:    %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf 'Exit code:    %s\n' "$MIRROR_EXIT_CODE"
+    printf 'Duration:     %ds\n' "$duration"
+    printf 'Transferred:  %s files\n' "$TRANSFER_COUNT"
+    printf 'Errors:       %s\n' "$ERROR_COUNT"
+    printf '════════════════════════════════════════════\n'
+  } >> "$LOG_FILE"
+}
 parse_stats()        { echo "0|0|0|0"; }
 print_summary()      { true; }
 handle_abort()       { true; }

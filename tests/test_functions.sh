@@ -75,6 +75,9 @@ assert_contains "error written to log" "$LOG_CONTENT" "Permission denied"
 
 rm -f "$LOG_FILE"
 
+echo "=== run_mirror interface ==="
+assert_contains "run_mirror is a function" "$(type run_mirror 2>&1)" "function"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]
