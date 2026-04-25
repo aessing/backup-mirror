@@ -25,10 +25,13 @@ assert_contains "header contains version" "$OUTPUT" "v1.0"
 assert_contains "header contains box chars" "$OUTPUT" "┌"
 
 echo "=== detect_drives ==="
-# Test with a real volume that exists
 OUTPUT=$(detect_drives)
-# Should return at least one line (system has volumes)
-assert_contains "detect_drives output contains separator" "$OUTPUT" "·"
+if [[ -n "$OUTPUT" ]]; then
+  assert_contains "detect_drives output contains separator ·" "$OUTPUT" "·"
+  assert_contains "detect_drives output contains tab" "$OUTPUT" $'\t'
+else
+  echo "  SKIP: detect_drives — no external volumes mounted"
+fi
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

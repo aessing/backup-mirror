@@ -58,7 +58,7 @@ print_header() {
 
 # ── Placeholder stubs (implemented in later tasks) ────────────────────────────
 detect_drives() {
-  local vol entry name total free
+  local vol name total free
   while IFS= read -r -d '' vol; do
     name=$(basename "$vol")
     # Skip the system root mount
