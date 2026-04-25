@@ -310,7 +310,7 @@ run_mirror() {
   if [[ "$mode" == "dry" ]]; then
     printf '%s⠸  Dry run — no files will be written%s\n' "$YELLOW" "$R"
   else
-    printf '%s⠸  Mirroring home folder…%s\n' "$BLUE" "$R"
+    printf '%s⠸  Mirroring home folder…%s\n' "$ORANGE" "$R"
   fi
   sep
   printf '\n'
