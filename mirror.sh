@@ -7,14 +7,14 @@ SCRIPT_NAME="Home Folder Mirror"
 START_TIME=$(date +%s)
 
 # Colors
-R='\033[0m'        # reset
-PURPLE='\033[0;35m'
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-RED='\033[0;31m'
-GRAY='\033[0;90m'
-BOLD='\033[1m'
+R=$'\033[0m'
+CYAN=$'\033[0;36m'
+BLUE=$'\033[0;34m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[0;33m'
+RED=$'\033[0;31m'
+GRAY=$'\033[0;90m'
+BOLD=$'\033[1m'
 
 # Exclusions (relative to ~/)
 EXCLUDES=(
@@ -42,7 +42,7 @@ MIRROR_EXIT_CODE=0
 sep() {
   local cols
   cols=$(tput cols 2>/dev/null || echo 60)
-  printf "${PURPLE}"
+  printf "${CYAN}"
   printf '─%.0s' $(seq 1 "$cols")
   printf "${R}\n"
 }
@@ -53,7 +53,7 @@ print_header() {
   local top="┌$(printf '─%.0s' $(seq 1 $len))┐"
   local mid="│${title}│"
   local bot="└$(printf '─%.0s' $(seq 1 $len))┘"
-  printf "\n${BLUE}%s\n%s\n%s${R}\n\n" "$top" "$mid" "$bot"
+  printf "\n${CYAN}%s\n%s\n%s${R}\n\n" "$top" "$mid" "$bot"
 }
 
 # ── Placeholder stubs (implemented in later tasks) ────────────────────────────
@@ -73,7 +73,7 @@ detect_drives() {
 
 select_drive() {
   if ! command -v fzf &>/dev/null; then
-    printf '%s✖  fzf is required but not found. Install with: brew install fzf%s\n' "$RED" "$R"
+    printf '%s✖  fzf is required but not found. Install with: brew install fzf%s\n' "$RED" "$R" >&2
     exit 1
   fi
 
@@ -81,12 +81,12 @@ select_drive() {
   drives=$(detect_drives)
 
   if [[ -z "$drives" ]]; then
-    printf '%s✖  No external drives found. Plug in a backup drive and try again.%s\n' "$RED" "$R"
+    printf '%s✖  No external drives found. Plug in a backup drive and try again.%s\n' "$RED" "$R" >&2
     exit 1
   fi
 
-  printf '%s▶ Select backup drive:%s\n' "$YELLOW" "$R"
-  printf '%s  Use ↑↓ arrow keys or type to filter%s\n\n' "$GRAY" "$R"
+  printf '%s▶ Select backup drive:%s\n' "$YELLOW" "$R" >&2
+  printf '%s  Use ↑↓ arrow keys or type to filter%s\n\n' "$GRAY" "$R" >&2
 
   local selected
   selected=$(echo "$drives" \
@@ -101,7 +101,7 @@ select_drive() {
     | awk -F'\t' '{print $NF}') || true
 
   if [[ -z "$selected" ]]; then
-    printf '%s✖  No drive selected. Exiting.%s\n' "$RED" "$R"
+    printf '%s✖  No drive selected. Exiting.%s\n' "$RED" "$R" >&2
     exit 1
   fi
 
@@ -110,8 +110,8 @@ select_drive() {
 
 select_run_mode() {
   local dest="$1"
-  printf "\n${GREEN}✔${R}  Destination: ${BLUE}%s${R}\n\n" "$dest"
-  printf '%s▶ Run mode:%s\n\n' "$YELLOW" "$R"
+  printf "\n${GREEN}✔${R}  Destination: ${BLUE}%s${R}\n\n" "$dest" >&2
+  printf '%s▶ Run mode:%s\n\n' "$YELLOW" "$R" >&2
 
   local choice
   choice=$(printf "Dry run  — preview changes, nothing is written\nLive run — mirror home folder for real" \
@@ -123,7 +123,7 @@ select_run_mode() {
           --color="pointer:#55efc4") || true
 
   if [[ -z "$choice" ]]; then
-    printf '%s✖  No mode selected. Exiting.%s\n' "$RED" "$R"
+    printf '%s✖  No mode selected. Exiting.%s\n' "$RED" "$R" >&2
     exit 1
   fi
 
@@ -222,7 +222,9 @@ run_mirror() {
   local dest="$1"   # e.g. /Volumes/Disk/Home Folder Backup
   local mode="$2"   # "dry" or "live"
 
-  LOG_FILE="${dest}/mirror.log"
+  local timestamp
+  timestamp=$(date '+%Y%m%d_%H%M%S')
+  LOG_FILE="${dest}/mirror_${timestamp}.log"
   local source="$HOME/"
 
   # Ensure destination exists
@@ -230,6 +232,9 @@ run_mirror() {
     printf '%s✖  Cannot create destination: %s%s\n' "$RED" "$dest" "$R"
     exit 1
   fi
+
+  # Purge log files older than 30 days
+  find "$dest" -maxdepth 1 -name 'mirror_*.log' -mtime +30 -delete 2>/dev/null || true
 
   # Count source files for progress display (with timeout)
   printf '%s  Counting source files…%s' "$GRAY" "$R"
