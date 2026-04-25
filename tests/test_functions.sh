@@ -78,6 +78,16 @@ rm -f "$LOG_FILE"
 echo "=== run_mirror interface ==="
 assert_contains "run_mirror is a function" "$(type run_mirror 2>&1)" "function"
 
+echo "=== parse_stats ==="
+SAMPLE_STATS="Number of regular files transferred: 1,842
+Number of deleted files: 23
+Total transferred file size: 6,410,123,456 bytes"
+
+OUTPUT=$(parse_stats "$SAMPLE_STATS")
+assert_contains "parse_stats finds transferred count" "$OUTPUT" "1,842"
+assert_contains "parse_stats finds deleted count" "$OUTPUT" "23"
+assert_contains "parse_stats finds total size" "$OUTPUT" "6,410,123,456"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

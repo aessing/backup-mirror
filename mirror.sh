@@ -300,8 +300,66 @@ run_mirror() {
     printf '════════════════════════════════════════════\n'
   } >> "$LOG_FILE"
 }
-parse_stats()        { echo "0|0|0|0"; }
-print_summary()      { true; }
+parse_stats() {
+  local stats_block="$1"
+  local transferred deleted total_size
+
+  transferred=$(printf '%s' "$stats_block" | grep "Number of regular files transferred:" \
+    | grep -oE '[0-9,]+$' | head -1 || echo "0")
+  deleted=$(printf '%s' "$stats_block" | grep "Number of deleted files:" \
+    | grep -oE '[0-9,]+$' | head -1 || echo "0")
+  total_size=$(printf '%s' "$stats_block" | grep "Total transferred file size:" \
+    | grep -oE '[0-9,]+' | head -1 || echo "0")
+
+  printf '%s|%s|%s' \
+    "${transferred:-0}" \
+    "${deleted:-0}" \
+    "${total_size:-0}"
+}
+
+print_summary() {
+  local rsync_exit="$1"
+  local stats_block="$2"
+  local log_path="$3"
+
+  local end_time
+  end_time=$(date +%s)
+  local elapsed=$(( end_time - START_TIME ))
+  local duration_str
+  if (( elapsed >= 60 )); then
+    duration_str="$(( elapsed / 60 ))m $(( elapsed % 60 ))s"
+  else
+    duration_str="${elapsed}s"
+  fi
+
+  local transferred deleted total_size
+  IFS='|' read -r transferred deleted total_size <<< "$(parse_stats "$stats_block")"
+
+  printf '\n'
+  sep
+
+  if [[ "$rsync_exit" -eq 0 || "$rsync_exit" -eq 23 ]]; then
+    printf '%s%s✔  Mirror complete%s   %s%s%s\n' "$GREEN" "$BOLD" "$R" "$GRAY" "$(date '+%Y-%m-%d %H:%M:%S')" "$R"
+  else
+    printf '%s%s✖  Mirror failed (exit %s)%s   %s%s%s\n' "$RED" "$BOLD" "$rsync_exit" "$R" "$GRAY" "$(date '+%Y-%m-%d %H:%M:%S')" "$R"
+  fi
+
+  sep
+  printf '\n'
+
+  printf '  %s%-22s%s%s\n' "$GRAY" "Files transferred:" "$R" "$transferred"
+  printf '  %s%-22s%s%s\n' "$GRAY" "Files deleted:"    "$R" "$deleted"
+  printf '  %s%-22s%s%s bytes\n' "$GRAY" "Total size:"  "$R" "$total_size"
+  printf '  %s%-22s%s%s\n' "$GRAY" "Duration:"         "$R" "$duration_str"
+
+  if [[ ${ERROR_COUNT:-0} -gt 0 ]]; then
+    printf '  %s%-22s%s%s%s  →  see mirror.log%s\n' "$GRAY" "Errors:" "$R" "$RED" "${ERROR_COUNT:-0}" "$R"
+  else
+    printf '  %s%-22s%s%snone%s\n' "$GRAY" "Errors:" "$R" "$GREEN" "$R"
+  fi
+
+  printf '\n  %sLog: %s%s\n\n' "$GRAY" "$log_path" "$R"
+}
 handle_abort()       { true; }
 
 main() {
