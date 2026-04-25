@@ -184,11 +184,11 @@ _update_progress() {
     local i
     for (( i=0; i<filled; i++ )); do bar+="█"; done
     for (( i=0; i<empty;  i++ )); do bar+="░"; done
-    printf '\r  %s  %d%%  (%d/%d files)  ' "$bar" "$pct" "$TRANSFER_COUNT" "$TOTAL_FILES" > /dev/tty 2>/dev/null || true
+    [[ -w /dev/tty ]] && printf '\r  %s  %d%%  (%d/%d files)  ' "$bar" "$pct" "$TRANSFER_COUNT" "$TOTAL_FILES" > /dev/tty 2>/dev/null || :
   else
-    printf '\r  Files transferred: %d  ' "$TRANSFER_COUNT" > /dev/tty 2>/dev/null || true
+    [[ -w /dev/tty ]] && printf '\r  Files transferred: %d  ' "$TRANSFER_COUNT" > /dev/tty 2>/dev/null || :
   fi
-}
+} 2>/dev/null
 
 process_output_line() {
   local line="$1"
