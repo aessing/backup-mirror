@@ -256,7 +256,7 @@ run_mirror() {
   volume=$(dirname "$dest")
   local timestamp
   timestamp=$(date '+%Y%m%d_%H%M%S')
-  local log_dir="${volume}/Home Mirror Logs"
+  local log_dir="${volume}/Home Folder Logs"
   local source="$HOME/"
 
   # Ensure destination and log directory exist
