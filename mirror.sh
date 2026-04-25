@@ -129,8 +129,46 @@ select_run_mode() {
   fi
 }
 
-build_exclude_args() { echo "--exclude=stub"; }
-count_source_files() { echo 0; }
+build_exclude_args() {
+  for path in "${EXCLUDES[@]}"; do
+    printf '%s\n' "--exclude=${path}"
+  done
+}
+count_source_files() {
+  local source_dir="${1:-$HOME}"
+
+  local find_args=("$source_dir" -xdev)
+  for path in "${EXCLUDES[@]}"; do
+    find_args+=(-path "${source_dir}/${path%/}" -prune -o)
+  done
+  find_args+=(-type f -print)
+
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  find "${find_args[@]}" 2>/dev/null | wc -l | tr -d ' ' > "$tmpfile" &
+  local find_pid=$!
+
+  local waited=0
+  while kill -0 "$find_pid" 2>/dev/null && [[ $waited -lt 3 ]]; do
+    sleep 1
+    ((++waited)) || true
+  done
+
+  if kill -0 "$find_pid" 2>/dev/null; then
+    kill "$find_pid" 2>/dev/null || true
+    wait "$find_pid" 2>/dev/null || true
+    rm -f "$tmpfile"
+    echo 0
+    return
+  fi
+
+  wait "$find_pid" 2>/dev/null || true
+  local count
+  count=$(cat "$tmpfile" 2>/dev/null | tr -d ' \n' || echo 0)
+  rm -f "$tmpfile"
+  echo "${count:-0}"
+}
 process_output_line(){ cat; }
 run_mirror()         { true; }
 parse_stats()        { echo "0|0|0|0"; }
