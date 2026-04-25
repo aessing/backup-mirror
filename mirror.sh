@@ -62,9 +62,9 @@ select_drive()       { echo "/tmp/stub"; }
 select_run_mode()    { echo "dry"; }
 build_exclude_args() { echo "--exclude=stub"; }
 count_source_files() { echo 0; }
-process_output_line(){ true; }
+process_output_line(){ cat; }
 run_mirror()         { true; }
-parse_stats()        { echo "0|0|0"; }
+parse_stats()        { echo "0|0|0|0"; }
 print_summary()      { true; }
 handle_abort()       { true; }
 
