@@ -55,6 +55,26 @@ assert_contains "count is non-empty" "$COUNT" ""
 [[ "$COUNT" =~ ^[0-9]+$ ]] && echo "  PASS: count is numeric ($COUNT)" && ((++PASS)) \
   || { echo "  FAIL: count is not numeric: '$COUNT'"; ((++FAIL)); }
 
+echo "=== process_output_line ==="
+# Set globals that process_output_line depends on
+TOTAL_FILES=100
+TRANSFER_COUNT=0
+ERROR_COUNT=0
+LOG_FILE=$(mktemp)
+
+# Simulate a file-transfer completion line from rsync --progress
+process_output_line "    1,234,567 100%   12.34MB/s    0:00:00"
+assert_eq "increments TRANSFER_COUNT on 100%" "$TRANSFER_COUNT" "1"
+
+process_output_line "rsync: [receiver] failed to open ... Permission denied (13)"
+assert_eq "increments ERROR_COUNT on rsync error" "$ERROR_COUNT" "1"
+
+LOG_CONTENT=$(cat "$LOG_FILE")
+assert_contains "line written to log" "$LOG_CONTENT" "100%"
+assert_contains "error written to log" "$LOG_CONTENT" "Permission denied"
+
+rm -f "$LOG_FILE"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

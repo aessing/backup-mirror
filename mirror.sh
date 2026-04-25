@@ -174,7 +174,47 @@ count_source_files() {
   rm -f "$tmpfile"
   echo "${count:-0}"
 }
-process_output_line(){ cat; }
+_update_progress() {
+  local filled empty bar pct
+  if [[ $TOTAL_FILES -gt 0 ]]; then
+    pct=$(( TRANSFER_COUNT * 100 / TOTAL_FILES ))
+    filled=$(( pct * 20 / 100 ))
+    empty=$(( 20 - filled ))
+    bar=""
+    local i
+    for (( i=0; i<filled; i++ )); do bar+="█"; done
+    for (( i=0; i<empty;  i++ )); do bar+="░"; done
+    printf '\r  %s  %d%%  (%d/%d files)  ' "$bar" "$pct" "$TRANSFER_COUNT" "$TOTAL_FILES"
+  else
+    printf '\r  Files transferred: %d  ' "$TRANSFER_COUNT"
+  fi
+}
+
+process_output_line() {
+  local line="$1"
+
+  # Always write raw line to log
+  printf '%s\n' "$line" >> "$LOG_FILE"
+
+  # Detect file-transfer completion: rsync --progress lines contain "100%"
+  if [[ "$line" =~ [[:space:]]100%[[:space:]] ]]; then
+    ((++TRANSFER_COUNT)) || true
+    _update_progress
+    return
+  fi
+
+  # Detect rsync errors
+  if [[ "$line" =~ ^"rsync: " || "$line" =~ ^"rsync error" ]]; then
+    ((++ERROR_COUNT)) || true
+    printf '\n%s⚠  Error:%s %s %s(logged)%s\n' "$RED" "$R" "$line" "$GRAY" "$R"
+    return
+  fi
+
+  # Print file paths being processed (lines starting with a non-space, non-rsync-keyword char)
+  if [[ "$line" =~ ^[^[:space:]] && ! "$line" =~ ^(sending|receiving|building|deleting|rsync|total|Number|File|Literal|Matched|sent|rcvd|bytes|speedup) ]]; then
+    printf '  %s%s%s\n' "$GRAY" "$line" "$R"
+  fi
+}
 run_mirror()         { true; }
 parse_stats()        { echo "0|0|0|0"; }
 print_summary()      { true; }
