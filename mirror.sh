@@ -18,16 +18,38 @@ BOLD=$'\033[1m'
 
 # Exclusions (relative to ~/)
 EXCLUDES=(
+  # iCloud / cloud sync
   "Library/Mobile Documents/"
+  "Library/CloudStorage/"
+  # Caches & build artefacts
   "Library/Caches/"
   "Library/Logs/"
   "Library/Saved Application State/"
   "Library/Developer/"
-  "Library/CloudStorage/"
+  ".cache/"
+  ".npm/"
+  ".nvm/"
+  ".kube/cache/"
+  # Apple sandboxed app data (unreadable without per-app entitlements)
+  "Library/Containers/"
+  "Library/Group Containers/"
+  # Apple system data (not useful in a personal backup)
   "Library/Application Support/CrashReporter/"
   "Library/Application Support/MobileSync/"
   "Library/Application Support/com.apple.sharedfilelist/"
+  "Library/Biome/"
+  "Library/CoreFollowUp/"
+  "Library/DuetExpertCenter/"
+  "Library/IntelligencePlatform/"
+  "Library/Daemon Containers/"
+  "Library/ContainerManager/"
+  "Library/PersonalizationPortrait/"
+  "Library/Metadata/CoreSpotlight/"
+  "Library/Trial/"
+  "Library/StatusKit/"
+  # Games
   "Library/Application Support/Steam/steamapps/"
+  # Trash
   ".Trash/"
 )
 
@@ -37,6 +59,8 @@ ERROR_COUNT=0
 TOTAL_FILES=0
 LOG_FILE=""
 MIRROR_EXIT_CODE=0
+COUNT_FILE=""   # temp file written by background file-count job
+COUNT_PID=0
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 sep() {
@@ -175,71 +199,84 @@ count_source_files() {
   echo "${count:-0}"
 }
 _update_progress() {
+  # Pick up async count result as soon as it lands
+  if [[ $TOTAL_FILES -eq 0 && -n "${COUNT_FILE:-}" && -s "${COUNT_FILE:-}" ]]; then
+    TOTAL_FILES=$(tr -d ' \n' < "$COUNT_FILE" 2>/dev/null || echo 0)
+  fi
+
   local filled empty bar pct
   if [[ $TOTAL_FILES -gt 0 ]]; then
     pct=$(( TRANSFER_COUNT * 100 / TOTAL_FILES ))
     filled=$(( pct * 20 / 100 ))
     empty=$(( 20 - filled ))
-    bar=""
+    bar="${ORANGE}"
     local i
     for (( i=0; i<filled; i++ )); do bar+="█"; done
+    bar+="${GRAY}"
     for (( i=0; i<empty;  i++ )); do bar+="░"; done
+    bar+="${R}"
     [[ -w /dev/tty ]] && printf '\r  %s  %d%%  (%d/%d files)  ' "$bar" "$pct" "$TRANSFER_COUNT" "$TOTAL_FILES" > /dev/tty 2>/dev/null || :
   else
-    [[ -w /dev/tty ]] && printf '\r  Files transferred: %d  ' "$TRANSFER_COUNT" > /dev/tty 2>/dev/null || :
+    [[ -w /dev/tty ]] && printf '\r  %s%d files transferred%s  ' "$GRAY" "$TRANSFER_COUNT" "$R" > /dev/tty 2>/dev/null || :
   fi
 } 2>/dev/null
 
 process_output_line() {
   local line="$1"
-
-  # Guard against empty LOG_FILE
   [[ -n "$LOG_FILE" ]] || return
 
-  # Always write raw line to log
-  printf '%s\n' "$line" >> "$LOG_FILE"
-
-  # Detect file-transfer completion: rsync --progress lines contain "100%"
+  # File-transfer completion: rsync --progress "100%" line → update progress bar only
   if [[ "$line" =~ ^[[:space:]]+[0-9,]+[[:space:]]+100%([[:space:]]|$) ]]; then
     ((++TRANSFER_COUNT)) || true
     _update_progress
     return
   fi
 
-  # Detect rsync errors
-  if [[ "$line" =~ ^"rsync: " || "$line" =~ ^"rsync error" ]]; then
+  # Warnings and errors (rsync(PID): warning/error: … or old-style rsync: …)
+  if [[ "$line" =~ ^rsync\([0-9]+\): ]] || [[ "$line" =~ ^"rsync: " ]] || [[ "$line" =~ ^"rsync error" ]]; then
+    printf '%s\n' "$line" >> "$LOG_FILE"
     ((++ERROR_COUNT)) || true
-    printf '\n%s⚠  Error:%s %s %s(logged)%s\n' "$RED" "$R" "$line" "$GRAY" "$R"
+    printf '\n%s⚠  %s%s %s(logged)%s\n' "$RED" "$line" "$R" "$GRAY" "$R"
     return
   fi
 
-  # Print file paths being processed (lines starting with a non-space, non-rsync-keyword char)
-  if [[ "$line" =~ ^[^[:space:]] && ! "$line" =~ ^(sending|receiving|building|deleting|rsync|[Tt]otal|Number|File|Literal|Matched|sent|rcvd|bytes|speedup|created|cannot|IO[[:space:]]|link_stat) ]]; then
-    printf '  %s%s%s\n' "$GRAY" "$line" "$R"
+  # Stats block lines (needed for summary parsing): log only, don't display
+  if [[ "$line" =~ ^(Number\ of|Total\ file|Total\ transferred|Literal\ data|Matched\ data|File\ list|sent\ [0-9]|total\ size) ]]; then
+    printf '%s\n' "$line" >> "$LOG_FILE"
+    return
   fi
+
+  # Everything else (file paths, per-file progress details): discard
 }
 run_mirror() {
   local dest="$1"   # e.g. /Volumes/Disk/Home Folder Backup
   local mode="$2"   # "dry" or "live"
 
+  local volume
+  volume=$(dirname "$dest")
   local timestamp
   timestamp=$(date '+%Y%m%d_%H%M%S')
-  LOG_FILE="${dest}/mirror_${timestamp}.log"
+  local log_dir="${volume}/Home Mirror Logs"
   local source="$HOME/"
 
-  # Ensure destination exists
-  if ! mkdir -p "$dest" 2>/dev/null; then
+  # Ensure destination and log directory exist
+  if ! mkdir -p "$dest" "$log_dir" 2>/dev/null; then
     printf '%s✖  Cannot create destination: %s%s\n' "$RED" "$dest" "$R"
     exit 1
   fi
 
-  # Purge log files older than 30 days
-  find "$dest" -maxdepth 1 -name 'mirror_*.log' -mtime +30 -delete 2>/dev/null || true
+  LOG_FILE="${log_dir}/mirror_${timestamp}.log"
 
-  # Count source files for progress display (with timeout)
-  printf '%s  Counting source files…%s' "$GRAY" "$R"
-  TOTAL_FILES=$(count_source_files "$HOME")
-  printf '\r\033[K'  # clear the counting line
+  # Purge log files older than 30 days
+  find "$log_dir" -maxdepth 1 -name 'mirror_*.log' -mtime +30 -delete 2>/dev/null || true
+
+  # Start file count in background (result read lazily by _update_progress)
+  TOTAL_FILES=0
+  COUNT_FILE=$(mktemp) || COUNT_FILE=""
+  if [[ -n "$COUNT_FILE" ]]; then
+    (count_source_files "$HOME" > "$COUNT_FILE") &
+    COUNT_PID=$!
+  fi
 
   # Write log header
   {
@@ -247,7 +284,6 @@ run_mirror() {
     printf 'Run started:  %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
     printf 'Mode:         %s\n' "$mode"
     printf 'Destination:  %s\n' "$dest"
-    printf 'Source files: %s\n' "$TOTAL_FILES"
     printf '════════════════════════════════════════════\n'
   } >> "$LOG_FILE"
 
@@ -292,6 +328,14 @@ run_mirror() {
 
   printf '\n\n'  # newline after progress bar
 
+  # Collect async file count (kill if still running, grab result if done)
+  if [[ -n "${COUNT_FILE:-}" ]]; then
+    kill "${COUNT_PID:-0}" 2>/dev/null || true
+    wait "${COUNT_PID:-0}" 2>/dev/null || true
+    [[ $TOTAL_FILES -eq 0 ]] && TOTAL_FILES=$(tr -d ' \n' < "$COUNT_FILE" 2>/dev/null || echo 0)
+    rm -f "$COUNT_FILE"
+  fi
+
   # Write log footer
   local end_time
   end_time=$(date +%s)
@@ -301,6 +345,7 @@ run_mirror() {
     printf 'Run ended:    %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
     printf 'Exit code:    %s\n' "$MIRROR_EXIT_CODE"
     printf 'Duration:     %ds\n' "$duration"
+    printf 'Source files: %s\n' "$TOTAL_FILES"
     printf 'Transferred:  %s files\n' "$TRANSFER_COUNT"
     printf 'Errors:       %s\n' "$ERROR_COUNT"
     printf '════════════════════════════════════════════\n'
@@ -359,7 +404,7 @@ print_summary() {
   printf '  %s%-22s%s%s\n' "$GRAY" "Duration:"         "$R" "$duration_str"
 
   if [[ ${ERROR_COUNT:-0} -gt 0 ]]; then
-    printf '  %s%-22s%s%s%s  →  see mirror.log%s\n' "$GRAY" "Errors:" "$R" "$RED" "${ERROR_COUNT:-0}" "$R"
+    printf '  %s%-22s%s%s%s  →  see log%s\n' "$GRAY" "Errors:" "$R" "$RED" "${ERROR_COUNT:-0}" "$R"
   else
     printf '  %s%-22s%s%snone%s\n' "$GRAY" "Errors:" "$R" "$GREEN" "$R"
   fi
