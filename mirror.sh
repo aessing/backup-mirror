@@ -8,7 +8,7 @@ START_TIME=$(date +%s)
 
 # Colors
 R=$'\033[0m'
-CYAN=$'\033[0;36m'
+ORANGE=$'\033[38;5;208m'
 BLUE=$'\033[0;34m'
 GREEN=$'\033[0;32m'
 YELLOW=$'\033[0;33m'
@@ -42,7 +42,7 @@ MIRROR_EXIT_CODE=0
 sep() {
   local cols
   cols=$(tput cols 2>/dev/null || echo 60)
-  printf "${CYAN}"
+  printf "${ORANGE}"
   printf '─%.0s' $(seq 1 "$cols")
   printf "${R}\n"
 }
@@ -53,7 +53,7 @@ print_header() {
   local top="┌$(printf '─%.0s' $(seq 1 $len))┐"
   local mid="│${title}│"
   local bot="└$(printf '─%.0s' $(seq 1 $len))┘"
-  printf "\n${CYAN}%s\n%s\n%s${R}\n\n" "$top" "$mid" "$bot"
+  printf "\n${ORANGE}%s\n%s\n%s${R}\n\n" "$top" "$mid" "$bot"
 }
 
 # ── Placeholder stubs (implemented in later tasks) ────────────────────────────
