@@ -358,11 +358,49 @@ print_summary() {
 
   printf '\n  %sLog: %s%s\n\n' "$GRAY" "$log_path" "$R"
 }
-handle_abort()       { true; }
+handle_abort() {
+  printf '\n\n%s⚠  Mirror aborted by user.%s\n' "$YELLOW" "$R"
+  if [[ -n "${LOG_FILE:-}" && -f "$LOG_FILE" ]]; then
+    printf '\nRun ABORTED by user at %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG_FILE"
+  fi
+  exit 130
+}
 
 main() {
+  trap handle_abort INT
+
   print_header
-  echo "Scaffold OK"
+
+  # Stage 1: Drive selection
+  local volume
+  volume=$(select_drive)
+  local dest="${volume}/Home Folder Backup"
+
+  # Stage 2: Run mode
+  local mode
+  mode=$(select_run_mode "$dest")
+
+  # Stage 3: Mirror
+  MIRROR_EXIT_CODE=0
+  run_mirror "$dest" "$mode"
+
+  # Capture --stats block from the log
+  local stats_block=""
+  if [[ -f "$LOG_FILE" ]]; then
+    stats_block=$(grep -A 20 "Number of files:" "$LOG_FILE" 2>/dev/null | tail -20 || true)
+  fi
+
+  # Stage 4: Summary
+  print_summary "$MIRROR_EXIT_CODE" "$stats_block" "$LOG_FILE"
+
+  # Exit with rsync code unless it's 23 (partial transfer = warning only)
+  if [[ "$MIRROR_EXIT_CODE" -eq 0 || "$MIRROR_EXIT_CODE" -eq 23 ]]; then
+    exit 0
+  else
+    printf '%s✖  rsync exited with error code %s. Check mirror.log for details.%s\n' \
+      "$RED" "$MIRROR_EXIT_CODE" "$R"
+    exit "$MIRROR_EXIT_CODE"
+  fi
 }
 
 # Guard: don't run main when sourced for testing
