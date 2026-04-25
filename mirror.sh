@@ -70,8 +70,65 @@ detect_drives() {
     printf '%s  ·  %s total  ·  %s free\t%s\n' "$name" "$total" "$free" "$vol"
   done < <(find /Volumes -maxdepth 1 -mindepth 1 -print0 2>/dev/null)
 }
-select_drive()       { echo "/tmp/stub"; }
-select_run_mode()    { echo "dry"; }
+
+select_drive() {
+  local drives
+  drives=$(detect_drives)
+
+  if [[ -z "$drives" ]]; then
+    printf "${RED}✖  No external drives found. Plug in a backup drive and try again.${R}\n"
+    exit 1
+  fi
+
+  printf "${YELLOW}▶ Select backup drive:${R}\n"
+  printf "${GRAY}  Use ↑↓ arrow keys or type to filter${R}\n\n"
+
+  local selected
+  selected=$(echo "$drives" \
+    | fzf --ansi \
+          --height=40% \
+          --border=none \
+          --prompt="  " \
+          --pointer="❯" \
+          --color="pointer:#55efc4,hl:#74b9ff" \
+          --delimiter=$'\t' \
+          --with-nth=1 \
+    | cut -f2)
+
+  if [[ -z "$selected" ]]; then
+    printf "${RED}✖  No drive selected. Exiting.${R}\n"
+    exit 1
+  fi
+
+  echo "$selected"
+}
+
+select_run_mode() {
+  local dest="$1"
+  printf "\n${GREEN}✔${R}  Destination: ${BLUE}%s${R}\n\n" "$dest"
+  printf "${YELLOW}▶ Run mode:${R}\n\n"
+
+  local choice
+  choice=$(printf "Dry run  — preview changes, nothing is written\nLive run — mirror home folder for real" \
+    | fzf --ansi \
+          --height=20% \
+          --border=none \
+          --prompt="  " \
+          --pointer="❯" \
+          --color="pointer:#55efc4")
+
+  if [[ -z "$choice" ]]; then
+    printf "${RED}✖  No mode selected. Exiting.${R}\n"
+    exit 1
+  fi
+
+  if [[ "$choice" == Dry* ]]; then
+    echo "dry"
+  else
+    echo "live"
+  fi
+}
+
 build_exclude_args() { echo "--exclude=stub"; }
 count_source_files() { echo 0; }
 process_output_line(){ cat; }

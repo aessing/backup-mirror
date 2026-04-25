@@ -33,6 +33,28 @@ else
   echo "  SKIP: detect_drives — no external volumes mounted"
 fi
 
+echo "=== select_drive and select_run_mode ==="
+# These are interactive — tested manually. Verify they are defined as functions.
+assert_contains "select_drive is a function" "$(type select_drive 2>&1)" "function"
+assert_contains "select_run_mode is a function" "$(type select_run_mode 2>&1)" "function"
+
+echo "=== build_exclude_args ==="
+OUTPUT=$(build_exclude_args)
+assert_contains "excludes iCloud" "$OUTPUT" "Library/Mobile Documents/"
+assert_contains "excludes Caches" "$OUTPUT" "Library/Caches/"
+assert_contains "excludes Trash" "$OUTPUT" ".Trash/"
+assert_contains "excludes Developer" "$OUTPUT" "Library/Developer/"
+# Count excludes: should be 11
+COUNT=$(echo "$OUTPUT" | grep -c '\-\-exclude' || true)
+assert_eq "has 11 excludes" "$COUNT" "11"
+
+echo "=== count_source_files ==="
+# Count files in /tmp — should be fast and return a number
+COUNT=$(count_source_files "/tmp")
+assert_contains "count is non-empty" "$COUNT" ""
+[[ "$COUNT" =~ ^[0-9]+$ ]] && echo "  PASS: count is numeric ($COUNT)" && ((++PASS)) \
+  || { echo "  FAIL: count is not numeric: '$COUNT'"; ((++FAIL)); }
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]
