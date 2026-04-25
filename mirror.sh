@@ -184,20 +184,23 @@ _update_progress() {
     local i
     for (( i=0; i<filled; i++ )); do bar+="█"; done
     for (( i=0; i<empty;  i++ )); do bar+="░"; done
-    printf '\r  %s  %d%%  (%d/%d files)  ' "$bar" "$pct" "$TRANSFER_COUNT" "$TOTAL_FILES"
+    printf '\r  %s  %d%%  (%d/%d files)  ' "$bar" "$pct" "$TRANSFER_COUNT" "$TOTAL_FILES" > /dev/tty 2>/dev/null || true
   else
-    printf '\r  Files transferred: %d  ' "$TRANSFER_COUNT"
+    printf '\r  Files transferred: %d  ' "$TRANSFER_COUNT" > /dev/tty 2>/dev/null || true
   fi
 }
 
 process_output_line() {
   local line="$1"
 
+  # Guard against empty LOG_FILE
+  [[ -n "$LOG_FILE" ]] || return
+
   # Always write raw line to log
   printf '%s\n' "$line" >> "$LOG_FILE"
 
   # Detect file-transfer completion: rsync --progress lines contain "100%"
-  if [[ "$line" =~ [[:space:]]100%[[:space:]] ]]; then
+  if [[ "$line" =~ ^[[:space:]]+[0-9,]+[[:space:]]+100%([[:space:]]|$) ]]; then
     ((++TRANSFER_COUNT)) || true
     _update_progress
     return
@@ -211,7 +214,7 @@ process_output_line() {
   fi
 
   # Print file paths being processed (lines starting with a non-space, non-rsync-keyword char)
-  if [[ "$line" =~ ^[^[:space:]] && ! "$line" =~ ^(sending|receiving|building|deleting|rsync|total|Number|File|Literal|Matched|sent|rcvd|bytes|speedup) ]]; then
+  if [[ "$line" =~ ^[^[:space:]] && ! "$line" =~ ^(sending|receiving|building|deleting|rsync|[Tt]otal|Number|File|Literal|Matched|sent|rcvd|bytes|speedup|created|cannot|IO[[:space:]]|link_stat) ]]; then
     printf '  %s%s%s\n' "$GRAY" "$line" "$R"
   fi
 }
