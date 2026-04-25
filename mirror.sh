@@ -72,16 +72,21 @@ detect_drives() {
 }
 
 select_drive() {
+  if ! command -v fzf &>/dev/null; then
+    printf '%s✖  fzf is required but not found. Install with: brew install fzf%s\n' "$RED" "$R"
+    exit 1
+  fi
+
   local drives
   drives=$(detect_drives)
 
   if [[ -z "$drives" ]]; then
-    printf "${RED}✖  No external drives found. Plug in a backup drive and try again.${R}\n"
+    printf '%s✖  No external drives found. Plug in a backup drive and try again.%s\n' "$RED" "$R"
     exit 1
   fi
 
-  printf "${YELLOW}▶ Select backup drive:${R}\n"
-  printf "${GRAY}  Use ↑↓ arrow keys or type to filter${R}\n\n"
+  printf '%s▶ Select backup drive:%s\n' "$YELLOW" "$R"
+  printf '%s  Use ↑↓ arrow keys or type to filter%s\n\n' "$GRAY" "$R"
 
   local selected
   selected=$(echo "$drives" \
@@ -93,10 +98,10 @@ select_drive() {
           --color="pointer:#55efc4,hl:#74b9ff" \
           --delimiter=$'\t' \
           --with-nth=1 \
-    | cut -f2)
+    | awk -F'\t' '{print $NF}') || true
 
   if [[ -z "$selected" ]]; then
-    printf "${RED}✖  No drive selected. Exiting.${R}\n"
+    printf '%s✖  No drive selected. Exiting.%s\n' "$RED" "$R"
     exit 1
   fi
 
@@ -106,7 +111,7 @@ select_drive() {
 select_run_mode() {
   local dest="$1"
   printf "\n${GREEN}✔${R}  Destination: ${BLUE}%s${R}\n\n" "$dest"
-  printf "${YELLOW}▶ Run mode:${R}\n\n"
+  printf '%s▶ Run mode:%s\n\n' "$YELLOW" "$R"
 
   local choice
   choice=$(printf "Dry run  — preview changes, nothing is written\nLive run — mirror home folder for real" \
@@ -115,10 +120,10 @@ select_run_mode() {
           --border=none \
           --prompt="  " \
           --pointer="❯" \
-          --color="pointer:#55efc4")
+          --color="pointer:#55efc4") || true
 
   if [[ -z "$choice" ]]; then
-    printf "${RED}✖  No mode selected. Exiting.${R}\n"
+    printf '%s✖  No mode selected. Exiting.%s\n' "$RED" "$R"
     exit 1
   fi
 
