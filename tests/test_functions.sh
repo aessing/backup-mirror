@@ -24,6 +24,12 @@ assert_contains "header contains script name" "$OUTPUT" "Home Folder Mirror"
 assert_contains "header contains version" "$OUTPUT" "v1.0"
 assert_contains "header contains box chars" "$OUTPUT" "┌"
 
+echo "=== detect_drives ==="
+# Test with a real volume that exists
+OUTPUT=$(detect_drives)
+# Should return at least one line (system has volumes)
+assert_contains "detect_drives output contains separator" "$OUTPUT" "·"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

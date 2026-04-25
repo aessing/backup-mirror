@@ -57,7 +57,19 @@ print_header() {
 }
 
 # ── Placeholder stubs (implemented in later tasks) ────────────────────────────
-detect_drives()      { echo "stub"; }
+detect_drives() {
+  local vol entry name total free
+  while IFS= read -r -d '' vol; do
+    name=$(basename "$vol")
+    # Skip the system root mount
+    if [[ "$(stat -f %d "$vol" 2>/dev/null)" == "$(stat -f %d / 2>/dev/null)" ]]; then
+      continue
+    fi
+    # df -H: human-readable (powers of 1000), columns: Filesystem Size Used Avail Capacity Mounted
+    read -r _ total _ free _ _ < <(df -H "$vol" 2>/dev/null | tail -1) || continue
+    printf '%s  ·  %s total  ·  %s free\t%s\n' "$name" "$total" "$free" "$vol"
+  done < <(find /Volumes -maxdepth 1 -mindepth 1 -print0 2>/dev/null)
+}
 select_drive()       { echo "/tmp/stub"; }
 select_run_mode()    { echo "dry"; }
 build_exclude_args() { echo "--exclude=stub"; }
