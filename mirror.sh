@@ -303,11 +303,11 @@ parse_stats() {
   local transferred deleted total_size
 
   transferred=$(printf '%s' "$stats_block" | grep "Number of regular files transferred:" \
-    | grep -oE '[0-9,]+$' | head -1 || echo "0")
+    | grep -oE '[0-9,]+' | head -1)
   deleted=$(printf '%s' "$stats_block" | grep "Number of deleted files:" \
-    | grep -oE '[0-9,]+$' | head -1 || echo "0")
+    | grep -oE '[0-9,]+' | head -1)
   total_size=$(printf '%s' "$stats_block" | grep "Total transferred file size:" \
-    | grep -oE '[0-9,]+' | head -1 || echo "0")
+    | grep -oE '[0-9,]+' | head -1)
 
   printf '%s|%s|%s' \
     "${transferred:-0}" \
