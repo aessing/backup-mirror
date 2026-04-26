@@ -420,8 +420,16 @@ assert_contains "Security workflow uploads Trivy SARIF" "$SECURITY_CONTENT" "git
 
 echo "=== README assets ==="
 README_CONTENT=$(sed -n '1,80p' README.md)
-assert_contains "README references backup comic header" "$README_CONTENT" "assets/data-backup-comic-header.png"
-assert_file_exists "README backup comic header image exists" "assets/data-backup-comic-header.png"
+assert_contains "README references titled backup comic header" "$README_CONTENT" "assets/data-backup-comic-header-title-1280x640.jpg"
+assert_file_exists "README titled backup comic header image exists" "assets/data-backup-comic-header-title-1280x640.jpg"
+if command -v sips >/dev/null 2>&1; then
+  HEADER_WIDTH=$(sips -g pixelWidth assets/data-backup-comic-header-title-1280x640.jpg 2>/dev/null | awk '/pixelWidth/ { print $2 }')
+  HEADER_HEIGHT=$(sips -g pixelHeight assets/data-backup-comic-header-title-1280x640.jpg 2>/dev/null | awk '/pixelHeight/ { print $2 }')
+  assert_eq "README titled backup comic header width" "$HEADER_WIDTH" "1280"
+  assert_eq "README titled backup comic header height" "$HEADER_HEIGHT" "640"
+else
+  echo "  SKIP: sips not installed; cannot verify README header dimensions"
+fi
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
