@@ -529,15 +529,17 @@ process_output_line() {
   # Everything else (file paths, per-file progress details): discard
 }
 run_mirror() {
-  local dest="$1"   # e.g. /Volumes/Disk/Home Folder Backup
-  local mode="$2"   # "dry" or "live"
+  local source="$1"     # e.g. "$HOME/" or "/Volumes/MyDisk/"
+  local dest="$2"       # e.g. "<vol>/Home Folder Backup" or "<vol>/MyDisk Backup"
+  local mode="$3"       # "dry" or "live"
+  local profile="${4:-home}"
+  local log_label="${5:-Home Folder}"
 
   local volume
   volume=$(dirname "$dest")
   local timestamp
   timestamp=$(date '+%Y%m%d_%H%M%S')
-  local log_dir="${volume}/Home Folder Logs"
-  local source="$HOME/"
+  local log_dir="${volume}/${log_label} Logs"
 
   if ! validate_destination "$dest" "$volume"; then
     return 1
@@ -551,8 +553,8 @@ run_mirror() {
   LOG_FILE="${log_dir}/mirror_${timestamp}.log"
   find "$log_dir" -maxdepth 1 -name 'mirror_*.log' -mtime +30 -delete 2>/dev/null || true
 
-  TOTAL_FILES=$(count_source_files "$HOME")
-  TOTAL_BYTES=$(count_source_bytes "$HOME")
+  TOTAL_FILES=$(count_source_files "$source" "$profile")
+  TOTAL_BYTES=$(count_source_bytes "$source" "$profile")
 
   # Write log header
   {
@@ -578,8 +580,7 @@ run_mirror() {
   # Add exclusions
   while IFS= read -r excl; do
     rsync_args+=("$excl")
-  # Task 5 will make this profile-aware; for now home is the only call site.
-  done < <(build_exclude_args home)
+  done < <(build_exclude_args "$profile")
 
   rsync_args+=("$source" "$dest/")
 
@@ -589,7 +590,9 @@ run_mirror() {
   if [[ "$mode" == "dry" ]]; then
     printf '%s⠸  Dry run — no files will be written%s\n' "$YELLOW" "$R"
   else
-    printf '%s⠸  Mirroring home folder…%s\n' "$ORANGE" "$R"
+    local pretty="$log_label"
+    [[ "$profile" == "home" ]] && pretty="home folder"
+    printf '%s⠸  Mirroring %s…%s\n' "$ORANGE" "$pretty" "$R"
   fi
   sep
   printf '\n'

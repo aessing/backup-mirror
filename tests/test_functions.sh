@@ -180,7 +180,7 @@ mkdir -p "$TEST_HOME/Documents" "$TEST_DEST"
 printf 'hello\n' > "$TEST_HOME/Documents/a.txt"
 printf 'stale\n' > "$TEST_DEST/stale.txt"
 
-HOME="$TEST_HOME" run_mirror "$TEST_DEST" live >/dev/null
+HOME="$TEST_HOME" run_mirror "$TEST_HOME/" "$TEST_DEST" live home "Home Folder" >/dev/null
 assert_contains "run_mirror writes timestamped log path" "$LOG_FILE" "$TEST_VOL/Home Folder Logs/mirror_"
 assert_file_exists "run_mirror writes timestamped log file" "$LOG_FILE"
 assert_contains "run_mirror logs transfer stats" "$(cat "$LOG_FILE")" "Number of files transferred:"
@@ -194,7 +194,7 @@ OLD_LOG="$TEST_VOL/Home Folder Logs/mirror_20000101_000000.log"
 mkdir -p "$(dirname "$OLD_LOG")"
 printf 'old\n' > "$OLD_LOG"
 touch -t 200001010000 "$OLD_LOG" 2>/dev/null || true
-HOME="$TEST_HOME" run_mirror "$TEST_DEST" dry >/dev/null
+HOME="$TEST_HOME" run_mirror "$TEST_HOME/" "$TEST_DEST" dry home "Home Folder" >/dev/null
 [[ ! -e "$OLD_LOG" ]] && echo "  PASS: run_mirror prunes logs older than 30 days" && ((++PASS)) \
   || { echo "  FAIL: old log was not pruned"; ((++FAIL)); }
 
@@ -207,7 +207,7 @@ printf 'hello\n' > "$TEST_HOME/file.txt"
 printf 'do-not-delete\n' > "$VICTIM/stale.txt"
 ln -s "$VICTIM" "$TEST_VOL/Home Folder Backup"
 set +e
-HOME="$TEST_HOME" run_mirror "$TEST_VOL/Home Folder Backup" live >/dev/null 2>&1
+HOME="$TEST_HOME" run_mirror "$TEST_HOME/" "$TEST_VOL/Home Folder Backup" live home "Home Folder" >/dev/null 2>&1
 SYMLINK_RC=$?
 set -e
 assert_eq "run_mirror rejects symlink destination" "$SYMLINK_RC" "1"
@@ -231,6 +231,21 @@ echo "=== select_drive accepts exclude-path arg ==="
 # accepts an argument by inspecting the body for "filter_out_drive".
 SELECT_DRIVE_BODY=$(type select_drive)
 assert_contains "select_drive uses filter_out_drive" "$SELECT_DRIVE_BODY" "filter_out_drive"
+
+echo "=== run_mirror integration (volume profile) ==="
+TMP_ROOT_V=$(mktemp -d)
+TEST_SRC_VOL="$TMP_ROOT_V/MyDisk"
+TEST_DEST_VOL="$TMP_ROOT_V/dest"
+mkdir -p "$TEST_SRC_VOL/.Spotlight-V100" "$TEST_SRC_VOL/Photos" "$TEST_DEST_VOL"
+printf 'idx\n' > "$TEST_SRC_VOL/.Spotlight-V100/index"
+printf 'pic\n' > "$TEST_SRC_VOL/Photos/img.txt"
+
+run_mirror "$TEST_SRC_VOL/" "$TEST_DEST_VOL/MyDisk Backup" live volume "MyDisk" >/dev/null
+assert_file_exists "volume mirror writes Photos/img.txt" "$TEST_DEST_VOL/MyDisk Backup/Photos/img.txt"
+[[ ! -e "$TEST_DEST_VOL/MyDisk Backup/.Spotlight-V100/index" ]] \
+  && echo "  PASS: volume mirror excludes Spotlight" && ((++PASS)) \
+  || { echo "  FAIL: Spotlight content was mirrored"; ((++FAIL)); }
+assert_contains "volume mirror writes log under <label> Logs" "$LOG_FILE" "$TEST_DEST_VOL/MyDisk Logs/mirror_"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
