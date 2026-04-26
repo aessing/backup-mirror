@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-VERSION="1.0"
-SCRIPT_NAME="Home Folder Mirror"
+VERSION="1.1"
+SCRIPT_NAME="Home / Disk Mirror"
 START_TIME=$(date +%s)
 
 # Colors
@@ -261,7 +261,7 @@ select_run_mode() {
   printf '%s▶ Run mode:%s\n\n' "$YELLOW" "$R" >&2
 
   local choice
-  choice=$(printf "Dry run  — preview changes, nothing is written\nLive run — mirror home folder for real" \
+  choice=$(printf "Dry run  — preview changes, nothing is written\nLive run — mirror selected source for real" \
     | fzf --ansi \
           --height=20% \
           --border=none \
@@ -704,18 +704,26 @@ main() {
 
   print_header
 
-  # Stage 1: Drive selection
-  local volume
-  volume=$(select_drive)
-  local dest="${volume}/Home Folder Backup"
+  # Stage 1: Source selection
+  local source_tuple
+  source_tuple=$(select_source)
+  local profile label source_path source_vol
+  IFS=$'\t' read -r profile label source_path source_vol <<< "$source_tuple"
 
-  # Stage 2: Run mode
+  printf '%s✔%s  Source: %s%s%s\n\n' "$GREEN" "$R" "$BLUE" "$label" "$R" >&2
+
+  # Stage 2: Destination drive
+  local volume
+  volume=$(select_drive "$source_vol")
+  local dest="${volume}/${label} Backup"
+
+  # Stage 3: Run mode
   local mode
   mode=$(select_run_mode "$dest")
 
-  # Stage 3: Mirror
+  # Stage 4: Mirror
   MIRROR_EXIT_CODE=0
-  run_mirror "$dest" "$mode"
+  run_mirror "$source_path" "$dest" "$mode" "$profile" "$label"
 
   # Capture --stats block from the log
   local stats_block=""
@@ -723,14 +731,13 @@ main() {
     stats_block=$(grep -A 20 "Number of files:" "$LOG_FILE" 2>/dev/null | tail -20 || true)
   fi
 
-  # Stage 4: Summary
+  # Stage 5: Summary
   print_summary "$MIRROR_EXIT_CODE" "$stats_block" "$LOG_FILE"
 
-  # Exit with rsync code unless it's 23 (partial transfer = warning only)
   if [[ "$MIRROR_EXIT_CODE" -eq 0 || "$MIRROR_EXIT_CODE" -eq 23 ]]; then
     exit 0
   else
-    printf '%s✖  rsync exited with error code %s. Check mirror.log for details.%s\n' \
+    printf '%s✖  rsync exited with error code %s. Check the log for details.%s\n' \
       "$RED" "$MIRROR_EXIT_CODE" "$R"
     exit "$MIRROR_EXIT_CODE"
   fi

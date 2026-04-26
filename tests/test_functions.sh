@@ -24,8 +24,8 @@ assert_contains "sep contains dash chars" "$OUTPUT" "─"
 
 echo "=== print_header ==="
 OUTPUT=$(print_header)
-assert_contains "header contains script name" "$OUTPUT" "Home Folder Mirror"
-assert_contains "header contains version" "$OUTPUT" "v1.0"
+assert_contains "header contains script name" "$OUTPUT" "Home / Disk Mirror"
+assert_contains "header contains version" "$OUTPUT" "v1.1"
 assert_contains "header contains box chars" "$OUTPUT" "┌"
 
 echo "=== detect_drives ==="
