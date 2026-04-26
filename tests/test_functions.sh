@@ -213,6 +213,18 @@ set -e
 assert_eq "run_mirror rejects symlink destination" "$SYMLINK_RC" "1"
 assert_file_exists "symlink rejection preserves target files" "$VICTIM/stale.txt"
 
+echo "=== select_source ==="
+assert_contains "select_source is a function" "$(type select_source 2>&1)" "function"
+
+echo "=== filter_out_drive ==="
+DRIVES_INPUT=$'Disk One  ·  1 TB  ·  500 GB free\t/Volumes/Disk One\nDisk Two  ·  2 TB  ·  1 TB free\t/Volumes/Disk Two'
+FILTERED=$(filter_out_drive "$DRIVES_INPUT" "/Volumes/Disk One")
+assert_contains "filter keeps non-matching drive" "$FILTERED" "Disk Two"
+[[ "$FILTERED" != *"Disk One"* ]] && echo "  PASS: filter drops the matching drive" && ((++PASS)) \
+  || { echo "  FAIL: filter did not drop matching drive"; ((++FAIL)); }
+EMPTY=$(filter_out_drive "$DRIVES_INPUT" "")
+assert_eq "empty filter is a no-op" "$EMPTY" "$DRIVES_INPUT"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]

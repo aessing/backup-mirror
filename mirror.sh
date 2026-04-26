@@ -141,6 +141,16 @@ detect_drives() {
   done < <(find /Volumes -maxdepth 1 -mindepth 1 -print0 2>/dev/null)
 }
 
+filter_out_drive() {
+  local drives="$1"
+  local exclude_path="$2"
+  if [[ -z "$exclude_path" ]]; then
+    printf '%s' "$drives"
+    return
+  fi
+  printf '%s' "$drives" | awk -F'\t' -v exc="$exclude_path" '$2 != exc { print }'
+}
+
 select_drive() {
   if ! command -v fzf &>/dev/null; then
     printf '%s✖  fzf is required but not found. Install with: brew install fzf%s\n' "$RED" "$R" >&2
@@ -176,6 +186,58 @@ select_drive() {
   fi
 
   echo "$selected"
+}
+
+select_source() {
+  if ! command -v fzf &>/dev/null; then
+    printf '%s✖  fzf is required but not found. Install with: brew install fzf%s\n' "$RED" "$R" >&2
+    exit 1
+  fi
+
+  local drives
+  drives=$(detect_drives)
+
+  local options
+  options=$(printf 'Home Folder\thome\t%s\t\n' "$HOME/")
+  if [[ -n "$drives" ]]; then
+    while IFS=$'\t' read -r display path; do
+      [[ -z "$display" ]] && continue
+      local name
+      name=$(basename "$path")
+      options+=$(printf '\n%s\tvolume\t%s/\t%s' "$display" "$path" "$path")
+    done <<< "$drives"
+  fi
+
+  printf '%s▶ Select source:%s\n' "$YELLOW" "$R" >&2
+  printf '%s  Use ↑↓ arrow keys or type to filter%s\n\n' "$GRAY" "$R" >&2
+
+  local selected
+  selected=$(printf '%s\n' "$options" \
+    | fzf --ansi \
+          --height=40% \
+          --border=none \
+          --prompt="  " \
+          --pointer="❯" \
+          --color="pointer:#55efc4,hl:#74b9ff" \
+          --delimiter=$'\t' \
+          --with-nth=1) || true
+
+  if [[ -z "$selected" ]]; then
+    printf '%s✖  No source selected. Exiting.%s\n' "$RED" "$R" >&2
+    exit 1
+  fi
+
+  # Output: profile<TAB>label<TAB>source_path<TAB>source_volume_or_empty
+  local profile path source_vol label
+  profile=$(awk -F'\t' '{print $2}' <<< "$selected")
+  path=$(awk -F'\t' '{print $3}' <<< "$selected")
+  source_vol=$(awk -F'\t' '{print $4}' <<< "$selected")
+  if [[ "$profile" == "home" ]]; then
+    label="Home Folder"
+  else
+    label=$(basename "$source_vol")
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$profile" "$label" "$path" "$source_vol"
 }
 
 render_run_mode_selection() {
