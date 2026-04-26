@@ -1,5 +1,7 @@
 # Home / Disk Mirror
 
+![Funny 3D comic-style data backup header](assets/data-backup-comic-header.png)
+
 [![CI/CD](https://github.com/aessing/backup-mirror/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/aessing/backup-mirror/actions/workflows/ci-cd.yml)
 
 A small Bash script (`mirror.sh`) that mirrors a chosen source — your **home folder** or any **mounted external volume** — to another external drive on macOS, with a clean fzf-driven TUI, dry-run mode, per-run logs, and sensible default exclusions.

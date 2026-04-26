@@ -401,9 +401,27 @@ assert_contains "Security workflow grants code scanning uploads" "$SECURITY_CONT
 assert_contains "Security workflow initializes CodeQL" "$SECURITY_CONTENT" "github/codeql-action/init@v4"
 assert_contains "Security workflow scans GitHub Actions language" "$SECURITY_CONTENT" "languages: actions"
 assert_contains "Security workflow analyzes CodeQL results" "$SECURITY_CONTENT" "github/codeql-action/analyze@v4"
-assert_contains "Security workflow runs Trivy" "$SECURITY_CONTENT" "aquasecurity/trivy-action@v"
+if grep -Eq 'aquasecurity/trivy-action@[0-9a-f]{40}' "$SECURITY_WORKFLOW"; then
+  echo "  PASS: Security workflow pins Trivy action by commit SHA"
+  ((++PASS))
+else
+  echo "  FAIL: Security workflow does not pin Trivy action by commit SHA"
+  ((++FAIL))
+fi
+if grep -Eq 'aquasecurity/trivy-action@v[0-9]' "$SECURITY_WORKFLOW"; then
+  echo "  FAIL: Security workflow uses an unpinned Trivy version tag"
+  ((++FAIL))
+else
+  echo "  PASS: Security workflow does not use an unpinned Trivy version tag"
+  ((++PASS))
+fi
 assert_contains "Security workflow uses filesystem scan" "$SECURITY_CONTENT" "scan-type: 'fs'"
 assert_contains "Security workflow uploads Trivy SARIF" "$SECURITY_CONTENT" "github/codeql-action/upload-sarif@v4"
+
+echo "=== README assets ==="
+README_CONTENT=$(sed -n '1,80p' README.md)
+assert_contains "README references backup comic header" "$README_CONTENT" "assets/data-backup-comic-header.png"
+assert_file_exists "README backup comic header image exists" "assets/data-backup-comic-header.png"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
