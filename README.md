@@ -1,6 +1,6 @@
 # Home / Disk Mirror
 
-![Funny 3D comic-style data backup header](assets/data-backup-comic-header.png)
+![Funny 3D comic-style data backup header titled Home / Disk Mirror](assets/data-backup-comic-header-title-1280x640.jpg)
 
 [![CI/CD](https://github.com/aessing/backup-mirror/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/aessing/backup-mirror/actions/workflows/ci-cd.yml)
 
