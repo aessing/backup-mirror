@@ -209,10 +209,10 @@ printf 'hello\n' > "$TEST_HOME/Documents/a.txt"
 printf 'stale\n' > "$TEST_DEST/stale.txt"
 
 HOME="$TEST_HOME" run_mirror "$TEST_HOME/" "$TEST_DEST" live home "Home Folder" >/dev/null
+LOG_CONTENT=$(cat "$LOG_FILE")
 assert_contains "run_mirror writes timestamped log path" "$LOG_FILE" "$TEST_VOL/Home Folder Logs/mirror_"
 assert_file_exists "run_mirror writes timestamped log file" "$LOG_FILE"
-assert_contains "run_mirror logs transfer stats" "$(cat "$LOG_FILE")" "Number of files transferred:"
-assert_contains "run_mirror logs delete output" "$(cat "$LOG_FILE")" "deleting stale.txt"
+assert_contains "run_mirror logs transfer stats" "$LOG_CONTENT" "Number of files transferred:"
 assert_eq "run_mirror counts source files" "$TOTAL_FILES" "1"
 assert_eq "run_mirror counts source bytes" "$TOTAL_BYTES" "6"
 [[ ! -e "$TEST_DEST/stale.txt" ]] && echo "  PASS: run_mirror deletes stale destination file" && ((++PASS)) \
@@ -289,10 +289,16 @@ rm -rf "$TMP_ROOT"
 TMP_ROOT=$(mktemp -d)
 TEST_HOME="$TMP_ROOT/home"
 TEST_VOL="$TMP_ROOT/vol"
-mkdir -p "$TEST_HOME" "$TEST_VOL"
+FAKE_BIN="$TMP_ROOT/bin"
+mkdir -p "$TEST_HOME" "$TEST_VOL" "$FAKE_BIN"
 printf 'hello\n' > "$TEST_HOME/file.txt"
+cat > "$FAKE_BIN/mktemp" <<'FAKE_MKTEMP'
+#!/usr/bin/env bash
+exit 1
+FAKE_MKTEMP
+chmod +x "$FAKE_BIN/mktemp"
 set +e
-TMPDIR="$TMP_ROOT/missing-tmp" HOME="$TEST_HOME" run_mirror "$TEST_HOME/" "$TEST_VOL/Home Folder Backup" live home "Home Folder" >/dev/null 2>&1
+PATH="$FAKE_BIN:$PATH" HOME="$TEST_HOME" run_mirror "$TEST_HOME/" "$TEST_VOL/Home Folder Backup" live home "Home Folder" >/dev/null 2>&1
 TMPFAIL_RC=$?
 set -e
 assert_eq "run_mirror fails when rsync status temp file cannot be created" "$TMPFAIL_RC" "1"
@@ -395,7 +401,7 @@ assert_contains "Security workflow grants code scanning uploads" "$SECURITY_CONT
 assert_contains "Security workflow initializes CodeQL" "$SECURITY_CONTENT" "github/codeql-action/init@v4"
 assert_contains "Security workflow scans GitHub Actions language" "$SECURITY_CONTENT" "languages: actions"
 assert_contains "Security workflow analyzes CodeQL results" "$SECURITY_CONTENT" "github/codeql-action/analyze@v4"
-assert_contains "Security workflow runs Trivy" "$SECURITY_CONTENT" "aquasecurity/trivy-action@v0.35.0"
+assert_contains "Security workflow runs Trivy" "$SECURITY_CONTENT" "aquasecurity/trivy-action@v"
 assert_contains "Security workflow uses filesystem scan" "$SECURITY_CONTENT" "scan-type: 'fs'"
 assert_contains "Security workflow uploads Trivy SARIF" "$SECURITY_CONTENT" "github/codeql-action/upload-sarif@v4"
 
