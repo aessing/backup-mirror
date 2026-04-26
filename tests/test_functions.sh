@@ -88,6 +88,17 @@ printf 'world!' > "$TMP_BYTES/b.txt"
 BYTES=$(count_source_bytes "$TMP_BYTES")
 assert_eq "counts total source bytes" "$BYTES" "11"
 
+echo "=== count_source_files (volume profile excludes Spotlight) ==="
+TMP_VOL=$(mktemp -d)
+mkdir -p "$TMP_VOL/.Spotlight-V100" "$TMP_VOL/Photos"
+printf 'a\n' > "$TMP_VOL/.Spotlight-V100/index"
+printf 'b\n' > "$TMP_VOL/Photos/img.txt"
+COUNT=$(count_source_files "$TMP_VOL" volume)
+assert_eq "volume profile excludes Spotlight content" "$COUNT" "1"
+COUNT_HOME=$(count_source_files "$TMP_VOL" home)
+assert_eq "home profile does not exclude Spotlight" "$COUNT_HOME" "2"
+rm -rf "$TMP_VOL"
+
 echo "=== render_progress_line ==="
 TOTAL_BYTES=0
 TOTAL_FILES=0

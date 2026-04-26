@@ -271,11 +271,20 @@ validate_destination() {
 
 count_source_files() {
   local source_dir="${1:-$HOME}"
+  local profile="${2:-home}"
+  local arr_name
+  case "$profile" in
+    home)   arr_name=HOME_EXCLUDES ;;
+    volume) arr_name=VOLUME_EXCLUDES ;;
+    *)      arr_name=HOME_EXCLUDES ;;
+  esac
 
   local find_args=("$source_dir" -xdev)
-  for path in "${EXCLUDES[@]}"; do
+  local path
+  # bash 3.2 — eval for array indirection (see build_exclude_args).
+  eval 'for path in "${'"$arr_name"'[@]}"; do
     find_args+=(-path "${source_dir}/${path%/}" -prune -o)
-  done
+  done'
   find_args+=(-type f -print)
 
   local tmpfile
@@ -307,11 +316,20 @@ count_source_files() {
 
 count_source_bytes() {
   local source_dir="${1:-$HOME}"
+  local profile="${2:-home}"
+  local arr_name
+  case "$profile" in
+    home)   arr_name=HOME_EXCLUDES ;;
+    volume) arr_name=VOLUME_EXCLUDES ;;
+    *)      arr_name=HOME_EXCLUDES ;;
+  esac
 
   local find_args=("$source_dir" -xdev)
-  for path in "${EXCLUDES[@]}"; do
+  local path
+  # bash 3.2 — eval for array indirection (see build_exclude_args).
+  eval 'for path in "${'"$arr_name"'[@]}"; do
     find_args+=(-path "${source_dir}/${path%/}" -prune -o)
-  done
+  done'
   find_args+=(-type f -print0)
 
   local tmpfile
