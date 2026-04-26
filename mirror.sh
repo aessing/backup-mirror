@@ -226,6 +226,7 @@ build_exclude_args() {
     volume) arr_name=VOLUME_EXCLUDES ;;
     *)      printf '%s✖  Unknown profile: %s%s\n' "$RED" "$profile" "$R" >&2; return 1 ;;
   esac
+  # bash 3.2 (macOS system bash) has no namerefs; eval is used for safe array indirection.
   local path
   eval 'for path in "${'"$arr_name"'[@]}"; do
     printf "%s\n" "--exclude=${path%/}"
@@ -494,7 +495,8 @@ run_mirror() {
   # Add exclusions
   while IFS= read -r excl; do
     rsync_args+=("$excl")
-  done < <(build_exclude_args)
+  # Task 5 will make this profile-aware; for now home is the only call site.
+  done < <(build_exclude_args home)
 
   rsync_args+=("$source" "$dest/")
 

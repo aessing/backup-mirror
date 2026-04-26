@@ -53,8 +53,7 @@ assert_contains "home excludes Caches" "$OUTPUT" "Library/Caches"
 assert_contains "home excludes Trash" "$OUTPUT" ".Trash"
 assert_contains "home excludes Developer" "$OUTPUT" "Library/Developer"
 HOME_COUNT=$(echo "$OUTPUT" | grep -c '\-\-exclude' || true)
-[[ "$HOME_COUNT" -gt 10 ]] && echo "  PASS: home has $HOME_COUNT excludes" && ((++PASS)) \
-  || { echo "  FAIL: home has too few excludes ($HOME_COUNT)"; ((++FAIL)); }
+assert_eq "home has exactly 60 excludes" "$HOME_COUNT" "60"
 
 echo "=== build_exclude_args (volume) ==="
 OUTPUT=$(build_exclude_args volume)
