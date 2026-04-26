@@ -10,6 +10,10 @@ assert_contains() { local desc="$1" haystack="$2" needle="$3"
   if [[ "$haystack" == *"$needle"* ]]; then echo "  PASS: $desc"; ((++PASS))
   else echo "  FAIL: $desc — '$needle' not found in output"; ((++FAIL)); fi
 }
+assert_file_exists() { local desc="$1" path="$2"
+  if [[ -f "$path" ]]; then echo "  PASS: $desc"; ((++PASS))
+  else echo "  FAIL: $desc — file missing: $path"; ((++FAIL)); fi
+}
 
 # Source mirror.sh without running main
 MIRROR_TEST_MODE=1 source "$(dirname "$0")/../mirror.sh"
@@ -37,6 +41,10 @@ echo "=== select_drive and select_run_mode ==="
 # These are interactive — tested manually. Verify they are defined as functions.
 assert_contains "select_drive is a function" "$(type select_drive 2>&1)" "function"
 assert_contains "select_run_mode is a function" "$(type select_run_mode 2>&1)" "function"
+OUTPUT=$(render_run_mode_selection "dry")
+assert_contains "dry mode selection is displayed" "$OUTPUT" "Dry run"
+OUTPUT=$(render_run_mode_selection "live")
+assert_contains "live mode selection is displayed" "$OUTPUT" "Live run"
 
 echo "=== build_exclude_args ==="
 OUTPUT=$(build_exclude_args)
@@ -55,22 +63,61 @@ assert_contains "count is non-empty" "$COUNT" ""
 [[ "$COUNT" =~ ^[0-9]+$ ]] && echo "  PASS: count is numeric ($COUNT)" && ((++PASS)) \
   || { echo "  FAIL: count is not numeric: '$COUNT'"; ((++FAIL)); }
 
+echo "=== count_source_bytes ==="
+TMP_BYTES=$(mktemp -d)
+printf 'hello' > "$TMP_BYTES/a.txt"
+printf 'world!' > "$TMP_BYTES/b.txt"
+BYTES=$(count_source_bytes "$TMP_BYTES")
+assert_eq "counts total source bytes" "$BYTES" "11"
+
+echo "=== render_progress_line ==="
+TOTAL_BYTES=0
+TOTAL_FILES=0
+TRANSFER_COUNT=7
+TRANSFERRED_BYTES=0
+CURRENT_FILE_BYTES=0
+OUTPUT=$(render_progress_line)
+assert_contains "unknown total progress still shows a bar" "$OUTPUT" "█"
+assert_contains "unknown total progress keeps file count" "$OUTPUT" "7 files transferred"
+BAR_AT_7=$(build_activity_bar)
+TRANSFER_COUNT=93849
+BAR_AT_MANY=$(build_activity_bar)
+assert_eq "unknown total activity bar is stable" "$BAR_AT_MANY" "$BAR_AT_7"
+ERROR_BLOCK=$(render_error_block "rsync: warning: sample"; printf END)
+assert_contains "error clears current progress line" "$ERROR_BLOCK" $'\r\033[K'
+assert_contains "error leaves blank row before progress redraw" "$ERROR_BLOCK" $'\n\nEND'
+
 echo "=== process_output_line ==="
 # Set globals that process_output_line depends on
 TOTAL_FILES=100
+TOTAL_BYTES=1000
+TRANSFERRED_BYTES=0
+CURRENT_FILE_BYTES=0
 TRANSFER_COUNT=0
 ERROR_COUNT=0
+DELETE_COUNT=0
 LOG_FILE=$(mktemp)
 
+process_output_line "          500  50%    1.00MB/s    0:00:00"
+assert_eq "tracks current file bytes before completion" "$CURRENT_FILE_BYTES" "500"
+assert_eq "does not complete bytes before 100%" "$TRANSFERRED_BYTES" "0"
+
 # Simulate a file-transfer completion line from rsync --progress
-process_output_line "    1,234,567 100%   12.34MB/s    0:00:00"
+process_output_line "        1,000 100%   12.34MB/s    0:00:00"
 assert_eq "increments TRANSFER_COUNT on 100%" "$TRANSFER_COUNT" "1"
+assert_eq "adds completed file bytes on 100%" "$TRANSFERRED_BYTES" "1000"
+assert_eq "clears current file bytes on completion" "$CURRENT_FILE_BYTES" "0"
+
+process_output_line "deleting stale.txt"
+assert_eq "increments DELETE_COUNT on deleting line" "$DELETE_COUNT" "1"
 
 process_output_line "rsync: [receiver] failed to open ... Permission denied (13)"
 assert_eq "increments ERROR_COUNT on rsync error" "$ERROR_COUNT" "1"
 
 LOG_CONTENT=$(cat "$LOG_FILE")
 assert_contains "error written to log" "$LOG_CONTENT" "Permission denied"
+assert_contains "normal rsync output written to log" "$LOG_CONTENT" "1,000 100%"
+assert_contains "delete output written to log" "$LOG_CONTENT" "deleting stale.txt"
 
 rm -f "$LOG_FILE"
 
@@ -78,6 +125,7 @@ echo "=== run_mirror interface ==="
 assert_contains "run_mirror is a function" "$(type run_mirror 2>&1)" "function"
 
 echo "=== parse_stats ==="
+DELETE_COUNT=0
 SAMPLE_STATS="Number of regular files transferred: 1,842
 Number of deleted files: 23
 Total transferred file size: 6,410,123,456 bytes"
@@ -86,6 +134,55 @@ OUTPUT=$(parse_stats "$SAMPLE_STATS")
 assert_contains "parse_stats finds transferred count" "$OUTPUT" "1,842"
 assert_contains "parse_stats finds deleted count" "$OUTPUT" "23"
 assert_contains "parse_stats finds total size" "$OUTPUT" "6,410,123,456"
+
+OPENRSYNC_STATS="Number of files: 3
+Number of files transferred: 1
+Total file size: 12 B
+Total transferred file size: 6 B"
+OUTPUT=$(parse_stats "$OPENRSYNC_STATS")
+assert_eq "parse_stats handles openrsync transferred wording" "$OUTPUT" "1|0|6"
+
+echo "=== run_mirror integration ==="
+TMP_ROOT=$(mktemp -d)
+TEST_HOME="$TMP_ROOT/home"
+TEST_VOL="$TMP_ROOT/vol"
+TEST_DEST="$TEST_VOL/Home Folder Backup"
+mkdir -p "$TEST_HOME/Documents" "$TEST_DEST"
+printf 'hello\n' > "$TEST_HOME/Documents/a.txt"
+printf 'stale\n' > "$TEST_DEST/stale.txt"
+
+HOME="$TEST_HOME" run_mirror "$TEST_DEST" live >/dev/null
+assert_contains "run_mirror writes timestamped log path" "$LOG_FILE" "$TEST_VOL/Home Folder Logs/mirror_"
+assert_file_exists "run_mirror writes timestamped log file" "$LOG_FILE"
+assert_contains "run_mirror logs transfer stats" "$(cat "$LOG_FILE")" "Number of files transferred:"
+assert_contains "run_mirror logs delete output" "$(cat "$LOG_FILE")" "deleting stale.txt"
+assert_eq "run_mirror counts source files" "$TOTAL_FILES" "1"
+assert_eq "run_mirror counts source bytes" "$TOTAL_BYTES" "6"
+[[ ! -e "$TEST_DEST/stale.txt" ]] && echo "  PASS: run_mirror deletes stale destination file" && ((++PASS)) \
+  || { echo "  FAIL: stale destination file still exists"; ((++FAIL)); }
+
+OLD_LOG="$TEST_VOL/Home Folder Logs/mirror_20000101_000000.log"
+mkdir -p "$(dirname "$OLD_LOG")"
+printf 'old\n' > "$OLD_LOG"
+touch -t 200001010000 "$OLD_LOG" 2>/dev/null || true
+HOME="$TEST_HOME" run_mirror "$TEST_DEST" dry >/dev/null
+[[ ! -e "$OLD_LOG" ]] && echo "  PASS: run_mirror prunes logs older than 30 days" && ((++PASS)) \
+  || { echo "  FAIL: old log was not pruned"; ((++FAIL)); }
+
+TMP_ROOT=$(mktemp -d)
+TEST_HOME="$TMP_ROOT/home"
+TEST_VOL="$TMP_ROOT/vol"
+VICTIM="$TMP_ROOT/victim"
+mkdir -p "$TEST_HOME" "$TEST_VOL" "$VICTIM"
+printf 'hello\n' > "$TEST_HOME/file.txt"
+printf 'do-not-delete\n' > "$VICTIM/stale.txt"
+ln -s "$VICTIM" "$TEST_VOL/Home Folder Backup"
+set +e
+HOME="$TEST_HOME" run_mirror "$TEST_VOL/Home Folder Backup" live >/dev/null 2>&1
+SYMLINK_RC=$?
+set -e
+assert_eq "run_mirror rejects symlink destination" "$SYMLINK_RC" "1"
+assert_file_exists "symlink rejection preserves target files" "$VICTIM/stale.txt"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

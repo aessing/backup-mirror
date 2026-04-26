@@ -91,11 +91,13 @@ EXCLUDES=(
 # Runtime state (set by run_mirror before processing begins)
 TRANSFER_COUNT=0
 ERROR_COUNT=0
+DELETE_COUNT=0
 TOTAL_FILES=0
+TOTAL_BYTES=0
+TRANSFERRED_BYTES=0
+CURRENT_FILE_BYTES=0
 LOG_FILE=""
 MIRROR_EXIT_CODE=0
-COUNT_FILE=""   # temp file written by background file-count job
-COUNT_PID=0
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 sep() {
@@ -167,6 +169,18 @@ select_drive() {
   echo "$selected"
 }
 
+render_run_mode_selection() {
+  local mode="$1"
+  case "$mode" in
+    dry)
+      printf '%s✔%s  Run mode: %sDry run%s — preview changes, nothing is written\n' "$GREEN" "$R" "$YELLOW" "$R"
+      ;;
+    live)
+      printf '%s✔%s  Run mode: %sLive run%s — mirror home folder for real\n' "$GREEN" "$R" "$ORANGE" "$R"
+      ;;
+  esac
+}
+
 select_run_mode() {
   local dest="$1"
   printf "\n${GREEN}✔${R}  Destination: ${BLUE}%s${R}\n\n" "$dest" >&2
@@ -187,8 +201,10 @@ select_run_mode() {
   fi
 
   if [[ "$choice" == Dry* ]]; then
+    render_run_mode_selection "dry" >&2
     echo "dry"
   else
+    render_run_mode_selection "live" >&2
     echo "live"
   fi
 }
@@ -198,6 +214,43 @@ build_exclude_args() {
     printf '%s\n' "--exclude=${path%/}"
   done
 }
+
+physical_path() {
+  local path="$1"
+  if [[ -d "$path" ]]; then
+    (cd -P "$path" && pwd)
+  else
+    local parent base
+    parent=$(dirname "$path")
+    base=$(basename "$path")
+    (cd -P "$parent" && printf '%s/%s\n' "$(pwd)" "$base")
+  fi
+}
+
+validate_destination() {
+  local dest="$1"
+  local volume="$2"
+
+  if [[ -L "$dest" ]]; then
+    printf '%s✖  Refusing symlink destination: %s%s\n' "$RED" "$dest" "$R" >&2
+    return 1
+  fi
+
+  if ! mkdir -p "$dest" 2>/dev/null; then
+    printf '%s✖  Cannot create destination: %s%s\n' "$RED" "$dest" "$R" >&2
+    return 1
+  fi
+
+  local real_volume real_dest
+  real_volume=$(physical_path "$volume") || return 1
+  real_dest=$(physical_path "$dest") || return 1
+
+  if [[ "$real_dest" != "$real_volume"/* ]]; then
+    printf '%s✖  Destination resolves outside selected volume: %s%s\n' "$RED" "$dest" "$R" >&2
+    return 1
+  fi
+}
+
 count_source_files() {
   local source_dir="${1:-$HOME}"
 
@@ -233,51 +286,142 @@ count_source_files() {
   rm -f "$tmpfile"
   echo "${count:-0}"
 }
-_update_progress() {
-  # Pick up async count result as soon as it lands
-  if [[ $TOTAL_FILES -eq 0 && -n "${COUNT_FILE:-}" && -s "${COUNT_FILE:-}" ]]; then
-    TOTAL_FILES=$(tr -d ' \n' < "$COUNT_FILE" 2>/dev/null || echo 0)
+
+count_source_bytes() {
+  local source_dir="${1:-$HOME}"
+
+  local find_args=("$source_dir" -xdev)
+  for path in "${EXCLUDES[@]}"; do
+    find_args+=(-path "${source_dir}/${path%/}" -prune -o)
+  done
+  find_args+=(-type f -print0)
+
+  local tmpfile
+  tmpfile=$(mktemp) || { echo 0; return; }
+
+  find "${find_args[@]}" 2>/dev/null \
+    | while IFS= read -r -d '' file; do
+        stat -f %z "$file" 2>/dev/null || stat -c %s "$file" 2>/dev/null || echo 0
+      done \
+    | awk '{sum += $1} END {printf "%.0f\n", sum}' > "$tmpfile" &
+  local pipe_pid=$!
+
+  local waited=0
+  while kill -0 "$pipe_pid" 2>/dev/null && [[ $waited -lt 3 ]]; do
+    sleep 1
+    ((++waited)) || true
+  done
+
+  if kill -0 "$pipe_pid" 2>/dev/null; then
+    kill "$pipe_pid" 2>/dev/null || true
+    wait "$pipe_pid" 2>/dev/null || true
+    rm -f "$tmpfile"
+    echo 0
+    return
   fi
 
-  local filled empty bar pct
-  if [[ $TOTAL_FILES -gt 0 ]]; then
+  wait "$pipe_pid" 2>/dev/null || true
+  local count
+  count=$(cat "$tmpfile" 2>/dev/null | tr -d ' \n' || echo 0)
+  rm -f "$tmpfile"
+  echo "${count:-0}"
+}
+
+human_bytes() {
+  local bytes="${1:-0}"
+  awk -v bytes="$bytes" '
+    BEGIN {
+      split("B KB MB GB TB", units, " ")
+      value = bytes + 0
+      unit = 1
+      while (value >= 1000 && unit < 5) {
+        value /= 1000
+        unit++
+      }
+      if (unit == 1) {
+        printf "%d %s", value, units[unit]
+      } else {
+        printf "%.1f %s", value, units[unit]
+      }
+    }
+  '
+}
+
+build_progress_bar() {
+  local pct="$1"
+  local filled empty bar
+  filled=$(( pct * 20 / 100 ))
+  empty=$(( 20 - filled ))
+  bar="${ORANGE}"
+  local i
+  for (( i=0; i<filled; i++ )); do bar+="█"; done
+  bar+="${GRAY}"
+  for (( i=0; i<empty;  i++ )); do bar+="░"; done
+  bar+="${R}"
+  printf '%s' "$bar"
+}
+
+build_activity_bar() {
+  printf '%s' "${ORANGE}█████${GRAY}░░░░░░░░░░░░░░░${R}"
+}
+
+render_progress_line() {
+  local pct shown_bytes
+  if [[ $TOTAL_BYTES -gt 0 ]]; then
+    shown_bytes=$(( TRANSFERRED_BYTES + CURRENT_FILE_BYTES ))
+    [[ $shown_bytes -gt $TOTAL_BYTES ]] && shown_bytes=$TOTAL_BYTES
+    pct=$(( shown_bytes * 100 / TOTAL_BYTES ))
+    printf '%s  %d%%  (%s/%s)' "$(build_progress_bar "$pct")" "$pct" "$(human_bytes "$shown_bytes")" "$(human_bytes "$TOTAL_BYTES")"
+  elif [[ $TOTAL_FILES -gt 0 ]]; then
     pct=$(( TRANSFER_COUNT * 100 / TOTAL_FILES ))
-    filled=$(( pct * 20 / 100 ))
-    empty=$(( 20 - filled ))
-    bar="${ORANGE}"
-    local i
-    for (( i=0; i<filled; i++ )); do bar+="█"; done
-    bar+="${GRAY}"
-    for (( i=0; i<empty;  i++ )); do bar+="░"; done
-    bar+="${R}"
-    [[ -w /dev/tty ]] && printf '\r  %s  %d%%  (%d/%d files)  ' "$bar" "$pct" "$TRANSFER_COUNT" "$TOTAL_FILES" > /dev/tty 2>/dev/null || :
+    printf '%s  %d%%  (%d/%d files)' "$(build_progress_bar "$pct")" "$pct" "$TRANSFER_COUNT" "$TOTAL_FILES"
   else
-    [[ -w /dev/tty ]] && printf '\r  %s%d files transferred%s  ' "$GRAY" "$TRANSFER_COUNT" "$R" > /dev/tty 2>/dev/null || :
+    printf '%s  %d files transferred  (total unavailable)' "$(build_activity_bar)" "$TRANSFER_COUNT"
   fi
+}
+
+_update_progress() {
+  [[ -w /dev/tty ]] && printf '\r  %s  ' "$(render_progress_line)" > /dev/tty 2>/dev/null || :
 } 2>/dev/null
+
+render_error_block() {
+  local line="$1"
+  printf '\r\033[K%s⚠  %s%s %s(logged)%s\n\n' "$RED" "$line" "$R" "$GRAY" "$R"
+}
 
 process_output_line() {
   local line="$1"
   [[ -n "$LOG_FILE" ]] || return
 
-  # File-transfer completion: rsync --progress "100%" line → update progress bar only
-  if [[ "$line" =~ ^[[:space:]]+[0-9,]+[[:space:]]+100%([[:space:]]|$) ]]; then
-    ((++TRANSFER_COUNT)) || true
+  printf '%s\n' "$line" >> "$LOG_FILE"
+
+  if [[ "$line" =~ ^[[:space:]]+([0-9,]+)[[:space:]]+([0-9]+)%([[:space:]]|$) ]]; then
+    local progress_bytes progress_pct
+    progress_bytes="${BASH_REMATCH[1]//,/}"
+    progress_pct="${BASH_REMATCH[2]}"
+
+    if [[ "$progress_pct" == "100" ]]; then
+      TRANSFERRED_BYTES=$(( TRANSFERRED_BYTES + progress_bytes ))
+      CURRENT_FILE_BYTES=0
+      ((++TRANSFER_COUNT)) || true
+    else
+      CURRENT_FILE_BYTES=$progress_bytes
+    fi
+
     _update_progress
+    return
+  fi
+
+  if [[ "$line" == deleting\ * ]]; then
+    ((++DELETE_COUNT)) || true
     return
   fi
 
   # Warnings and errors (rsync(PID): warning/error: … or old-style rsync: …)
   if [[ "$line" =~ ^rsync\([0-9]+\): ]] || [[ "$line" =~ ^"rsync: " ]] || [[ "$line" =~ ^"rsync error" ]]; then
-    printf '%s\n' "$line" >> "$LOG_FILE"
     ((++ERROR_COUNT)) || true
-    printf '\n%s⚠  %s%s %s(logged)%s\n' "$RED" "$line" "$R" "$GRAY" "$R"
-    return
-  fi
-
-  # Stats block lines (needed for summary parsing): log only, don't display
-  if [[ "$line" =~ ^(Number\ of|Total\ file|Total\ transferred|Literal\ data|Matched\ data|File\ list|sent\ [0-9]|total\ size) ]]; then
-    printf '%s\n' "$line" >> "$LOG_FILE"
+    render_error_block "$line"
+    _update_progress
     return
   fi
 
@@ -294,24 +438,20 @@ run_mirror() {
   local log_dir="${volume}/Home Folder Logs"
   local source="$HOME/"
 
-  # Ensure destination and log directory exist
-  if ! mkdir -p "$dest" "$log_dir" 2>/dev/null; then
-    printf '%s✖  Cannot create destination: %s%s\n' "$RED" "$dest" "$R"
-    exit 1
+  if ! validate_destination "$dest" "$volume"; then
+    return 1
+  fi
+
+  if ! mkdir -p "$log_dir" 2>/dev/null; then
+    printf '%s✖  Cannot create log directory: %s%s\n' "$RED" "$log_dir" "$R" >&2
+    return 1
   fi
 
   LOG_FILE="${log_dir}/mirror_${timestamp}.log"
-
-  # Purge log files older than 30 days
   find "$log_dir" -maxdepth 1 -name 'mirror_*.log' -mtime +30 -delete 2>/dev/null || true
 
-  # Start file count in background (result read lazily by _update_progress)
-  TOTAL_FILES=0
-  COUNT_FILE=$(mktemp) || COUNT_FILE=""
-  if [[ -n "$COUNT_FILE" ]]; then
-    (count_source_files "$HOME" > "$COUNT_FILE") &
-    COUNT_PID=$!
-  fi
+  TOTAL_FILES=$(count_source_files "$HOME")
+  TOTAL_BYTES=$(count_source_bytes "$HOME")
 
   # Write log header
   {
@@ -328,6 +468,7 @@ run_mirror() {
     --no-specials
     --delete
     --human-readable
+    --verbose
     --progress
     --stats
   )
@@ -353,7 +494,10 @@ run_mirror() {
 
   # Run rsync, process output line by line
   TRANSFER_COUNT=0
+  TRANSFERRED_BYTES=0
+  CURRENT_FILE_BYTES=0
   ERROR_COUNT=0
+  DELETE_COUNT=0
   local tmprc
   tmprc=$(mktemp) || { MIRROR_EXIT_CODE=0; return; }
   while IFS= read -r line; do
@@ -363,14 +507,6 @@ run_mirror() {
   rm -f "$tmprc"
 
   printf '\n\n'  # newline after progress bar
-
-  # Collect async file count (kill if still running, grab result if done)
-  if [[ -n "${COUNT_FILE:-}" ]]; then
-    kill "${COUNT_PID:-0}" 2>/dev/null || true
-    wait "${COUNT_PID:-0}" 2>/dev/null || true
-    [[ $TOTAL_FILES -eq 0 ]] && TOTAL_FILES=$(tr -d ' \n' < "$COUNT_FILE" 2>/dev/null || echo 0)
-    rm -f "$COUNT_FILE"
-  fi
 
   # Write log footer
   local end_time
@@ -382,7 +518,10 @@ run_mirror() {
     printf 'Exit code:    %s\n' "$MIRROR_EXIT_CODE"
     printf 'Duration:     %ds\n' "$duration"
     printf 'Source files: %s\n' "$TOTAL_FILES"
+    printf 'Source bytes: %s\n' "$TOTAL_BYTES"
     printf 'Transferred:  %s files\n' "$TRANSFER_COUNT"
+    printf 'Transferred:  %s bytes\n' "$TRANSFERRED_BYTES"
+    printf 'Deleted:      %s files\n' "$DELETE_COUNT"
     printf 'Errors:       %s\n' "$ERROR_COUNT"
     printf '════════════════════════════════════════════\n'
   } >> "$LOG_FILE"
@@ -391,7 +530,7 @@ parse_stats() {
   local stats_block="$1"
   local transferred deleted total_size
 
-  transferred=$(printf '%s' "$stats_block" | grep "Number of regular files transferred:" \
+  transferred=$(printf '%s' "$stats_block" | grep -E "Number of (regular )?files transferred:" \
     | grep -oE '[0-9,]+' | head -1)
   deleted=$(printf '%s' "$stats_block" | grep "Number of deleted files:" \
     | grep -oE '[0-9,]+' | head -1)
@@ -400,7 +539,7 @@ parse_stats() {
 
   printf '%s|%s|%s' \
     "${transferred:-0}" \
-    "${deleted:-0}" \
+    "${deleted:-${DELETE_COUNT:-0}}" \
     "${total_size:-0}"
 }
 
