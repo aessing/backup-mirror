@@ -100,6 +100,10 @@ printf 'hello' > "$TMP_BYTES/a.txt"
 printf 'world!' > "$TMP_BYTES/b.txt"
 BYTES=$(count_source_bytes "$TMP_BYTES")
 assert_eq "counts total source bytes" "$BYTES" "11"
+mkdir -p "$TMP_BYTES/Library/Caches"
+printf 'ignored' > "$TMP_BYTES/Library/Caches/cache.db"
+BYTES=$(count_source_bytes "$TMP_BYTES/" home)
+assert_eq "counts source bytes with trailing slash excludes" "$BYTES" "11"
 
 echo "=== count_source_files (volume profile excludes Spotlight) ==="
 TMP_VOL=$(mktemp -d)
@@ -108,9 +112,20 @@ printf 'a\n' > "$TMP_VOL/.Spotlight-V100/index"
 printf 'b\n' > "$TMP_VOL/Photos/img.txt"
 COUNT=$(count_source_files "$TMP_VOL" volume)
 assert_eq "volume profile excludes Spotlight content" "$COUNT" "1"
+COUNT_TRAILING=$(count_source_files "$TMP_VOL/" volume)
+assert_eq "volume profile excludes Spotlight content with trailing slash source" "$COUNT_TRAILING" "1"
 COUNT_HOME=$(count_source_files "$TMP_VOL" home)
 assert_eq "home profile does not exclude Spotlight" "$COUNT_HOME" "2"
 rm -rf "$TMP_VOL"
+
+echo "=== count_source_files (home profile trailing slash excludes) ==="
+TMP_HOME=$(mktemp -d)
+mkdir -p "$TMP_HOME/Library/Caches" "$TMP_HOME/Documents"
+printf 'cache\n' > "$TMP_HOME/Library/Caches/cache.db"
+printf 'doc\n' > "$TMP_HOME/Documents/doc.txt"
+COUNT=$(count_source_files "$TMP_HOME/" home)
+assert_eq "home profile excludes cache content with trailing slash source" "$COUNT" "1"
+rm -rf "$TMP_HOME"
 
 echo "=== render_progress_line ==="
 TOTAL_BYTES=0
@@ -214,6 +229,22 @@ HOME="$TEST_HOME" run_mirror "$TEST_HOME/" "$TEST_DEST" dry home "Home Folder" >
 TMP_ROOT=$(mktemp -d)
 TEST_HOME="$TMP_ROOT/home"
 TEST_VOL="$TMP_ROOT/vol"
+OUTSIDE="$TMP_ROOT/outside"
+mkdir -p "$TEST_HOME" "$TEST_VOL" "$OUTSIDE"
+printf 'hello\n' > "$TEST_HOME/file.txt"
+ln -s "$OUTSIDE" "$TEST_VOL/Home Folder Logs"
+set +e
+HOME="$TEST_HOME" run_mirror "$TEST_HOME/" "$TEST_VOL/Home Folder Backup" dry home "Home Folder" >/dev/null 2>&1
+LOG_SYMLINK_RC=$?
+set -e
+assert_eq "run_mirror rejects symlink log directory" "$LOG_SYMLINK_RC" "1"
+OUTSIDE_LOG_COUNT=$(find "$OUTSIDE" -type f -name 'mirror_*.log' | wc -l | tr -d ' ')
+assert_eq "log symlink rejection does not write outside volume" "$OUTSIDE_LOG_COUNT" "0"
+rm -rf "$TMP_ROOT"
+
+TMP_ROOT=$(mktemp -d)
+TEST_HOME="$TMP_ROOT/home"
+TEST_VOL="$TMP_ROOT/vol"
 VICTIM="$TMP_ROOT/victim"
 mkdir -p "$TEST_HOME" "$TEST_VOL" "$VICTIM"
 printf 'hello\n' > "$TEST_HOME/file.txt"
@@ -225,6 +256,48 @@ SYMLINK_RC=$?
 set -e
 assert_eq "run_mirror rejects symlink destination" "$SYMLINK_RC" "1"
 assert_file_exists "symlink rejection preserves target files" "$VICTIM/stale.txt"
+
+echo "=== run_mirror failure handling ==="
+TMP_ROOT=$(mktemp -d)
+TEST_HOME="$TMP_ROOT/home"
+TEST_VOL="$TMP_ROOT/vol"
+FAKE_BIN="$TMP_ROOT/bin"
+mkdir -p "$TEST_HOME" "$TEST_VOL" "$FAKE_BIN"
+printf 'hello\n' > "$TEST_HOME/file.txt"
+cat > "$FAKE_BIN/rsync" <<'FAKE_RSYNC'
+#!/usr/bin/env bash
+printf 'rsync: simulated partial transfer error\n'
+printf 'Number of files: 1\n'
+printf 'Number of files transferred: 0\n'
+printf 'Total transferred file size: 0 bytes\n'
+exit 23
+FAKE_RSYNC
+chmod +x "$FAKE_BIN/rsync"
+set +e
+PATH="$FAKE_BIN:$PATH" HOME="$TEST_HOME" run_mirror "$TEST_HOME/" "$TEST_VOL/Home Folder Backup" live home "Home Folder" >/dev/null 2>&1
+PARTIAL_RC=$?
+set -e
+assert_eq "run_mirror returns rsync partial transfer code" "$PARTIAL_RC" "23"
+assert_eq "run_mirror records rsync partial transfer code" "$MIRROR_EXIT_CODE" "23"
+STATS_BLOCK=$(grep -A 20 "Number of files:" "$LOG_FILE" 2>/dev/null | tail -20 || true)
+SUMMARY=$(print_summary "$MIRROR_EXIT_CODE" "$STATS_BLOCK" "$LOG_FILE")
+assert_contains "partial transfer summary reports failure" "$SUMMARY" "Mirror failed"
+[[ "$SUMMARY" != *"Mirror complete"* ]] && echo "  PASS: partial transfer summary is not marked complete" && ((++PASS)) \
+  || { echo "  FAIL: partial transfer summary was marked complete"; ((++FAIL)); }
+rm -rf "$TMP_ROOT"
+
+TMP_ROOT=$(mktemp -d)
+TEST_HOME="$TMP_ROOT/home"
+TEST_VOL="$TMP_ROOT/vol"
+mkdir -p "$TEST_HOME" "$TEST_VOL"
+printf 'hello\n' > "$TEST_HOME/file.txt"
+set +e
+TMPDIR="$TMP_ROOT/missing-tmp" HOME="$TEST_HOME" run_mirror "$TEST_HOME/" "$TEST_VOL/Home Folder Backup" live home "Home Folder" >/dev/null 2>&1
+TMPFAIL_RC=$?
+set -e
+assert_eq "run_mirror fails when rsync status temp file cannot be created" "$TMPFAIL_RC" "1"
+assert_eq "run_mirror records internal temp file failure" "$MIRROR_EXIT_CODE" "1"
+rm -rf "$TMP_ROOT"
 
 echo "=== select_source ==="
 assert_contains "select_source is a function" "$(type select_source 2>&1)" "function"
@@ -259,6 +332,72 @@ assert_file_exists "volume mirror writes Photos/img.txt" "$TEST_DEST_VOL/MyDisk 
   && echo "  PASS: volume mirror excludes Spotlight" && ((++PASS)) \
   || { echo "  FAIL: Spotlight content was mirrored"; ((++FAIL)); }
 assert_contains "volume mirror writes log under <label> Logs" "$LOG_FILE" "$TEST_DEST_VOL/MyDisk Logs/mirror_"
+
+echo "=== GitHub Actions workflow ==="
+WORKFLOW=".github/workflows/ci-cd.yml"
+assert_file_exists "CI/CD workflow exists" "$WORKFLOW"
+if [[ -f "$WORKFLOW" ]] && ruby -e 'require "yaml"; YAML.load_file(ARGV[0])' "$WORKFLOW" >/dev/null 2>&1; then
+  echo "  PASS: CI/CD workflow is valid YAML"
+  ((++PASS))
+else
+  echo "  FAIL: CI/CD workflow is not valid YAML"
+  ((++FAIL))
+fi
+if [[ -f "$WORKFLOW" ]]; then
+  WORKFLOW_CONTENT=$(sed -n '1,240p' "$WORKFLOW")
+else
+  WORKFLOW_CONTENT=""
+fi
+assert_contains "CI/CD workflow runs on push" "$WORKFLOW_CONTENT" "push:"
+assert_contains "CI/CD workflow runs on pull requests" "$WORKFLOW_CONTENT" "pull_request:"
+assert_contains "CI/CD workflow supports manual dispatch" "$WORKFLOW_CONTENT" "workflow_dispatch:"
+assert_contains "CI/CD workflow uses macOS runner for tests" "$WORKFLOW_CONTENT" "macos-latest"
+assert_contains "CI/CD workflow runs syntax checks" "$WORKFLOW_CONTENT" "bash -n mirror.sh tests/test_functions.sh"
+assert_contains "CI/CD workflow runs test suite" "$WORKFLOW_CONTENT" "bash tests/test_functions.sh"
+assert_contains "CI/CD workflow publishes tagged releases" "$WORKFLOW_CONTENT" "gh release"
+
+echo "=== Dependabot configuration ==="
+DEPENDABOT_CONFIG=".github/dependabot.yml"
+assert_file_exists "Dependabot config exists" "$DEPENDABOT_CONFIG"
+if [[ -f "$DEPENDABOT_CONFIG" ]] && ruby -e 'require "yaml"; YAML.load_file(ARGV[0])' "$DEPENDABOT_CONFIG" >/dev/null 2>&1; then
+  echo "  PASS: Dependabot config is valid YAML"
+  ((++PASS))
+else
+  echo "  FAIL: Dependabot config is not valid YAML"
+  ((++FAIL))
+fi
+if [[ -f "$DEPENDABOT_CONFIG" ]]; then
+  DEPENDABOT_CONTENT=$(sed -n '1,200p' "$DEPENDABOT_CONFIG")
+else
+  DEPENDABOT_CONTENT=""
+fi
+assert_contains "Dependabot watches GitHub Actions" "$DEPENDABOT_CONTENT" 'package-ecosystem: "github-actions"'
+assert_contains "Dependabot watches repo root workflows" "$DEPENDABOT_CONTENT" 'directory: "/"'
+assert_contains "Dependabot updates weekly" "$DEPENDABOT_CONTENT" "interval: weekly"
+
+echo "=== Security workflow ==="
+SECURITY_WORKFLOW=".github/workflows/security.yml"
+assert_file_exists "Security workflow exists" "$SECURITY_WORKFLOW"
+if [[ -f "$SECURITY_WORKFLOW" ]] && ruby -e 'require "yaml"; YAML.load_file(ARGV[0])' "$SECURITY_WORKFLOW" >/dev/null 2>&1; then
+  echo "  PASS: Security workflow is valid YAML"
+  ((++PASS))
+else
+  echo "  FAIL: Security workflow is not valid YAML"
+  ((++FAIL))
+fi
+if [[ -f "$SECURITY_WORKFLOW" ]]; then
+  SECURITY_CONTENT=$(sed -n '1,260p' "$SECURITY_WORKFLOW")
+else
+  SECURITY_CONTENT=""
+fi
+assert_contains "Security workflow has weekly schedule" "$SECURITY_CONTENT" "cron:"
+assert_contains "Security workflow grants code scanning uploads" "$SECURITY_CONTENT" "security-events: write"
+assert_contains "Security workflow initializes CodeQL" "$SECURITY_CONTENT" "github/codeql-action/init@v4"
+assert_contains "Security workflow scans GitHub Actions language" "$SECURITY_CONTENT" "languages: actions"
+assert_contains "Security workflow analyzes CodeQL results" "$SECURITY_CONTENT" "github/codeql-action/analyze@v4"
+assert_contains "Security workflow runs Trivy" "$SECURITY_CONTENT" "aquasecurity/trivy-action@v0.35.0"
+assert_contains "Security workflow uses filesystem scan" "$SECURITY_CONTENT" "scan-type: 'fs'"
+assert_contains "Security workflow uploads Trivy SARIF" "$SECURITY_CONTENT" "github/codeql-action/upload-sarif@v4"
 
 echo ""
 echo "Results: $PASS passed, $FAIL failed"

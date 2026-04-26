@@ -313,17 +313,78 @@ physical_path() {
   fi
 }
 
+trim_trailing_slashes() {
+  local path="$1"
+  while [[ "$path" != "/" && "$path" == */ ]]; do
+    path="${path%/}"
+  done
+  printf '%s' "${path:-/}"
+}
+
+path_has_symlink_component() {
+  local base="$1"
+  local path="$2"
+  local relative current part
+
+  [[ "$path" == "$base" ]] && return 1
+  relative="${path#"$base"/}"
+  current="$base"
+
+  while [[ -n "$relative" ]]; do
+    if [[ "$relative" == */* ]]; then
+      part="${relative%%/*}"
+      relative="${relative#*/}"
+    else
+      part="$relative"
+      relative=""
+    fi
+
+    [[ -z "$part" || "$part" == "." ]] && continue
+    current="${current%/}/$part"
+    [[ -L "$current" ]] && return 0
+    [[ -e "$current" ]] || break
+  done
+
+  return 1
+}
+
 validate_destination() {
   local dest="$1"
   local volume="$2"
+  local kind="${3:-destination}"
 
-  if [[ -L "$dest" ]]; then
-    printf '%s✖  Refusing symlink destination: %s%s\n' "$RED" "$dest" "$R" >&2
+  local clean_volume clean_dest relative
+  clean_volume=$(trim_trailing_slashes "$volume")
+  clean_dest=$(trim_trailing_slashes "$dest")
+
+  if [[ "$clean_volume" == "/" ]]; then
+    if [[ "$clean_dest" != /* ]]; then
+      printf '%s✖  Refusing %s outside selected volume: %s%s\n' "$RED" "$kind" "$dest" "$R" >&2
+      return 1
+    fi
+  elif [[ "$clean_dest" != "$clean_volume" && "$clean_dest" != "$clean_volume"/* ]]; then
+    printf '%s✖  Refusing %s outside selected volume: %s%s\n' "$RED" "$kind" "$dest" "$R" >&2
+    return 1
+  fi
+
+  relative=""
+  if [[ "$clean_dest" != "$clean_volume" ]]; then
+    relative="${clean_dest#"$clean_volume"/}"
+  fi
+  case "$relative" in
+    ..|../*|*/../*|*/..)
+      printf '%s✖  Refusing %s with parent-directory reference: %s%s\n' "$RED" "$kind" "$dest" "$R" >&2
+      return 1
+      ;;
+  esac
+
+  if path_has_symlink_component "$clean_volume" "$clean_dest"; then
+    printf '%s✖  Refusing symlink %s: %s%s\n' "$RED" "$kind" "$dest" "$R" >&2
     return 1
   fi
 
   if ! mkdir -p "$dest" 2>/dev/null; then
-    printf '%s✖  Cannot create destination: %s%s\n' "$RED" "$dest" "$R" >&2
+    printf '%s✖  Cannot create %s: %s%s\n' "$RED" "$kind" "$dest" "$R" >&2
     return 1
   fi
 
@@ -332,7 +393,7 @@ validate_destination() {
   real_dest=$(physical_path "$dest") || return 1
 
   if [[ "$real_dest" != "$real_volume"/* ]]; then
-    printf '%s✖  Destination resolves outside selected volume: %s%s\n' "$RED" "$dest" "$R" >&2
+    printf '%s✖  %s resolves outside selected volume: %s%s\n' "$RED" "$kind" "$dest" "$R" >&2
     return 1
   fi
 }
@@ -348,10 +409,17 @@ count_source_files() {
   esac
 
   local find_args=("$source_dir" -xdev)
+  local prune_base
+  # shellcheck disable=SC2034  # referenced inside eval below for bash 3.2 array indirection
+  prune_base=$(trim_trailing_slashes "$source_dir")
   local path
   # bash 3.2 — eval for array indirection (see build_exclude_args).
   eval 'for path in "${'"$arr_name"'[@]}"; do
-    find_args+=(-path "${source_dir}/${path%/}" -prune -o)
+    if [[ "$prune_base" == "/" ]]; then
+      find_args+=(-path "/${path%/}" -prune -o)
+    else
+      find_args+=(-path "${prune_base}/${path%/}" -prune -o)
+    fi
   done'
   find_args+=(-type f -print)
 
@@ -393,10 +461,17 @@ count_source_bytes() {
   esac
 
   local find_args=("$source_dir" -xdev)
+  local prune_base
+  # shellcheck disable=SC2034  # referenced inside eval below for bash 3.2 array indirection
+  prune_base=$(trim_trailing_slashes "$source_dir")
   local path
   # bash 3.2 — eval for array indirection (see build_exclude_args).
   eval 'for path in "${'"$arr_name"'[@]}"; do
-    find_args+=(-path "${source_dir}/${path%/}" -prune -o)
+    if [[ "$prune_base" == "/" ]]; then
+      find_args+=(-path "/${path%/}" -prune -o)
+    else
+      find_args+=(-path "${prune_base}/${path%/}" -prune -o)
+    fi
   done'
   find_args+=(-type f -print0)
 
@@ -538,6 +613,9 @@ run_mirror() {
   local profile="${4:-home}"
   local log_label="${5:-Home Folder}"
 
+  MIRROR_EXIT_CODE=0
+  LOG_FILE=""
+
   local volume
   volume=$(dirname "$dest")
   local timestamp
@@ -545,11 +623,12 @@ run_mirror() {
   local log_dir="${volume}/${log_label} Logs"
 
   if ! validate_destination "$dest" "$volume"; then
+    MIRROR_EXIT_CODE=1
     return 1
   fi
 
-  if ! mkdir -p "$log_dir" 2>/dev/null; then
-    printf '%s✖  Cannot create log directory: %s%s\n' "$RED" "$log_dir" "$R" >&2
+  if ! validate_destination "$log_dir" "$volume" "log directory"; then
+    MIRROR_EXIT_CODE=1
     return 1
   fi
 
@@ -607,7 +686,12 @@ run_mirror() {
   ERROR_COUNT=0
   DELETE_COUNT=0
   local tmprc
-  tmprc=$(mktemp) || { MIRROR_EXIT_CODE=0; return; }
+  if ! tmprc=$(mktemp); then
+    MIRROR_EXIT_CODE=1
+    printf '%s✖  Cannot create temporary rsync status file.%s\n' "$RED" "$R" >&2
+    printf '\nInternal error: cannot create temporary rsync status file.\n' >> "$LOG_FILE" 2>/dev/null || true
+    return 1
+  fi
   while IFS= read -r line; do
     process_output_line "$line"
   done < <(set +e; rsync "${rsync_args[@]}" 2>&1; echo $? > "$tmprc")
@@ -633,6 +717,8 @@ run_mirror() {
     printf 'Errors:       %s\n' "$ERROR_COUNT"
     printf '════════════════════════════════════════════\n'
   } >> "$LOG_FILE"
+
+  return "$MIRROR_EXIT_CODE"
 }
 parse_stats() {
   local stats_block="$1"
@@ -672,7 +758,7 @@ print_summary() {
   printf '\n'
   sep
 
-  if [[ "$rsync_exit" -eq 0 || "$rsync_exit" -eq 23 ]]; then
+  if [[ "$rsync_exit" -eq 0 ]]; then
     printf '%s%s✔  Mirror complete%s   %s%s%s\n' "$GREEN" "$BOLD" "$R" "$GRAY" "$(date '+%Y-%m-%d %H:%M:%S')" "$R"
   else
     printf '%s%s✖  Mirror failed (exit %s)%s   %s%s%s\n' "$RED" "$BOLD" "$rsync_exit" "$R" "$GRAY" "$(date '+%Y-%m-%d %H:%M:%S')" "$R"
@@ -726,7 +812,17 @@ main() {
 
   # Stage 4: Mirror
   MIRROR_EXIT_CODE=0
-  run_mirror "$source_path" "$dest" "$mode" "$profile" "$label"
+  local run_status=0
+  if run_mirror "$source_path" "$dest" "$mode" "$profile" "$label"; then
+    run_status=0
+  else
+    run_status=$?
+    [[ "$MIRROR_EXIT_CODE" -eq 0 ]] && MIRROR_EXIT_CODE="$run_status"
+  fi
+
+  if [[ "$run_status" -ne 0 && -z "$LOG_FILE" ]]; then
+    exit "$run_status"
+  fi
 
   # Capture --stats block from the log
   local stats_block=""
@@ -737,7 +833,7 @@ main() {
   # Stage 5: Summary
   print_summary "$MIRROR_EXIT_CODE" "$stats_block" "$LOG_FILE"
 
-  if [[ "$MIRROR_EXIT_CODE" -eq 0 || "$MIRROR_EXIT_CODE" -eq 23 ]]; then
+  if [[ "$MIRROR_EXIT_CODE" -eq 0 ]]; then
     exit 0
   else
     printf '%s✖  rsync exited with error code %s. Check the log for details.%s\n' \

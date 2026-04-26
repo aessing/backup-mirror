@@ -1,0 +1,65 @@
+name: CI/CD
+
+"on":
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-cd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ShellCheck and tests
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install ShellCheck
+        run: brew install shellcheck
+
+      - name: Syntax check
+        run: bash -n mirror.sh tests/test_functions.sh
+
+      - name: Test suite
+        run: bash tests/test_functions.sh
+
+  release:
+    name: Publish tagged release
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Package script
+        run: |
+          mkdir -p dist
+          install -m 0755 mirror.sh dist/mirror.sh
+          sha256sum dist/mirror.sh > dist/mirror.sh.sha256
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/mirror.sh dist/mirror.sh.sha256 --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/mirror.sh dist/mirror.sh.sha256 \
+              --title "$GITHUB_REF_NAME" \
+              --notes "Automated release for $GITHUB_REF_NAME."
+          fi
