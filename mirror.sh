@@ -17,6 +17,7 @@ GRAY=$'\033[0;90m'
 BOLD=$'\033[1m'
 
 # Home folder exclusions (relative to ~/)
+# shellcheck disable=SC2034  # consumed via eval indirection in build_exclude_args / count_source_*
 HOME_EXCLUDES=(
   # iCloud / cloud sync
   "Library/Mobile Documents/"
@@ -89,6 +90,7 @@ HOME_EXCLUDES=(
 )
 
 # External-volume exclusions (macOS volume metadata, auto-regenerated)
+# shellcheck disable=SC2034  # consumed via eval indirection in build_exclude_args / count_source_*
 VOLUME_EXCLUDES=(
   ".Spotlight-V100/"
   ".Trashes/"
@@ -120,9 +122,10 @@ sep() {
 print_header() {
   local title="  ${SCRIPT_NAME}   v${VERSION}  "
   local len=${#title}
-  local top="┌$(printf '─%.0s' $(seq 1 $len))┐"
-  local mid="│${title}│"
-  local bot="└$(printf '─%.0s' $(seq 1 $len))┘"
+  local top mid bot
+  top="┌$(printf '─%.0s' $(seq 1 "$len"))┐"
+  mid="│${title}│"
+  bot="└$(printf '─%.0s' $(seq 1 "$len"))┘"
   printf "\n${ORANGE}%s\n%s\n%s${R}\n\n" "$top" "$mid" "$bot"
 }
 

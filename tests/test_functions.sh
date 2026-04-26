@@ -15,7 +15,21 @@ assert_file_exists() { local desc="$1" path="$2"
   else echo "  FAIL: $desc — file missing: $path"; ((++FAIL)); fi
 }
 
+echo "=== shellcheck ==="
+if command -v shellcheck >/dev/null 2>&1; then
+  if shellcheck --severity=warning -x "$(dirname "$0")/../mirror.sh" "$(dirname "$0")/test_functions.sh"; then
+    echo "  PASS: shellcheck clean (severity=warning)"
+    ((++PASS))
+  else
+    echo "  FAIL: shellcheck reported issues"
+    ((++FAIL))
+  fi
+else
+  echo "  SKIP: shellcheck not installed"
+fi
+
 # Source mirror.sh without running main
+# shellcheck source=../mirror.sh
 MIRROR_TEST_MODE=1 source "$(dirname "$0")/../mirror.sh"
 
 echo "=== sep ==="
@@ -67,7 +81,6 @@ assert_eq "volume has exactly 5 excludes" "$VOLUME_COUNT" "5"
 
 echo "=== exclusion arrays disjoint ==="
 HOME_OUT=$(build_exclude_args home)
-VOL_OUT=$(build_exclude_args volume)
 DISJOINT=1
 for vol_path in ".Spotlight-V100" ".Trashes" ".fseventsd" ".DocumentRevisions-V100" ".TemporaryItems"; do
   if echo "$HOME_OUT" | grep -qE "exclude=${vol_path}\$"; then DISJOINT=0; fi
