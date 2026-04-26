@@ -16,8 +16,8 @@ RED=$'\033[0;31m'
 GRAY=$'\033[0;90m'
 BOLD=$'\033[1m'
 
-# Exclusions (relative to ~/)
-EXCLUDES=(
+# Home folder exclusions (relative to ~/)
+HOME_EXCLUDES=(
   # iCloud / cloud sync
   "Library/Mobile Documents/"
   "Library/CloudStorage/"
@@ -86,6 +86,15 @@ EXCLUDES=(
   "Library/Application Support/Steam/steamapps/"
   # Trash
   ".Trash/"
+)
+
+# External-volume exclusions (macOS volume metadata, auto-regenerated)
+VOLUME_EXCLUDES=(
+  ".Spotlight-V100/"
+  ".Trashes/"
+  ".fseventsd/"
+  ".DocumentRevisions-V100/"
+  ".TemporaryItems/"
 )
 
 # Runtime state (set by run_mirror before processing begins)
@@ -210,9 +219,17 @@ select_run_mode() {
 }
 
 build_exclude_args() {
-  for path in "${EXCLUDES[@]}"; do
-    printf '%s\n' "--exclude=${path%/}"
-  done
+  local profile="${1:-home}"
+  local arr_name
+  case "$profile" in
+    home)   arr_name=HOME_EXCLUDES ;;
+    volume) arr_name=VOLUME_EXCLUDES ;;
+    *)      printf '%s✖  Unknown profile: %s%s\n' "$RED" "$profile" "$R" >&2; return 1 ;;
+  esac
+  local path
+  eval 'for path in "${'"$arr_name"'[@]}"; do
+    printf "%s\n" "--exclude=${path%/}"
+  done'
 }
 
 physical_path() {

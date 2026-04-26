@@ -46,15 +46,34 @@ assert_contains "dry mode selection is displayed" "$OUTPUT" "Dry run"
 OUTPUT=$(render_run_mode_selection "live")
 assert_contains "live mode selection is displayed" "$OUTPUT" "Live run"
 
-echo "=== build_exclude_args ==="
-OUTPUT=$(build_exclude_args)
-assert_contains "excludes iCloud" "$OUTPUT" "Library/Mobile Documents"
-assert_contains "excludes Caches" "$OUTPUT" "Library/Caches"
-assert_contains "excludes Trash" "$OUTPUT" ".Trash"
-assert_contains "excludes Developer" "$OUTPUT" "Library/Developer"
-# Count excludes: should be at least 11
-COUNT=$(echo "$OUTPUT" | grep -c '\-\-exclude' || true)
-assert_contains "has excludes" "$COUNT" ""
+echo "=== build_exclude_args (home) ==="
+OUTPUT=$(build_exclude_args home)
+assert_contains "home excludes iCloud" "$OUTPUT" "Library/Mobile Documents"
+assert_contains "home excludes Caches" "$OUTPUT" "Library/Caches"
+assert_contains "home excludes Trash" "$OUTPUT" ".Trash"
+assert_contains "home excludes Developer" "$OUTPUT" "Library/Developer"
+HOME_COUNT=$(echo "$OUTPUT" | grep -c '\-\-exclude' || true)
+[[ "$HOME_COUNT" -gt 10 ]] && echo "  PASS: home has $HOME_COUNT excludes" && ((++PASS)) \
+  || { echo "  FAIL: home has too few excludes ($HOME_COUNT)"; ((++FAIL)); }
+
+echo "=== build_exclude_args (volume) ==="
+OUTPUT=$(build_exclude_args volume)
+assert_contains "volume excludes Spotlight" "$OUTPUT" ".Spotlight-V100"
+assert_contains "volume excludes Trashes" "$OUTPUT" ".Trashes"
+assert_contains "volume excludes fseventsd" "$OUTPUT" ".fseventsd"
+assert_contains "volume excludes DocumentRevisions" "$OUTPUT" ".DocumentRevisions-V100"
+assert_contains "volume excludes TemporaryItems" "$OUTPUT" ".TemporaryItems"
+VOLUME_COUNT=$(echo "$OUTPUT" | grep -c '\-\-exclude' || true)
+assert_eq "volume has exactly 5 excludes" "$VOLUME_COUNT" "5"
+
+echo "=== exclusion arrays disjoint ==="
+HOME_OUT=$(build_exclude_args home)
+VOL_OUT=$(build_exclude_args volume)
+DISJOINT=1
+for vol_path in ".Spotlight-V100" ".Trashes" ".fseventsd" ".DocumentRevisions-V100" ".TemporaryItems"; do
+  if echo "$HOME_OUT" | grep -qE "exclude=${vol_path}\$"; then DISJOINT=0; fi
+done
+assert_eq "no volume excludes leak into home list" "$DISJOINT" "1"
 
 echo "=== count_source_files ==="
 # Count files in /tmp — should be fast and return a number
