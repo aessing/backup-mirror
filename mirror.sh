@@ -152,6 +152,8 @@ filter_out_drive() {
 }
 
 select_drive() {
+  local exclude_path="${1:-}"
+
   if ! command -v fzf &>/dev/null; then
     printf '%s✖  fzf is required but not found. Install with: brew install fzf%s\n' "$RED" "$R" >&2
     exit 1
@@ -159,9 +161,10 @@ select_drive() {
 
   local drives
   drives=$(detect_drives)
+  drives=$(filter_out_drive "$drives" "$exclude_path")
 
   if [[ -z "$drives" ]]; then
-    printf '%s✖  No external drives found. Plug in a backup drive and try again.%s\n' "$RED" "$R" >&2
+    printf '%s✖  No external drives available as a destination. Plug in another drive and try again.%s\n' "$RED" "$R" >&2
     exit 1
   fi
 

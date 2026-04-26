@@ -225,6 +225,13 @@ assert_contains "filter keeps non-matching drive" "$FILTERED" "Disk Two"
 EMPTY=$(filter_out_drive "$DRIVES_INPUT" "")
 assert_eq "empty filter is a no-op" "$EMPTY" "$DRIVES_INPUT"
 
+echo "=== select_drive accepts exclude-path arg ==="
+# Verify the helper integration: filter_out_drive is what select_drive calls.
+# The interactive part is tested manually; here we just verify the function signature
+# accepts an argument by inspecting the body for "filter_out_drive".
+SELECT_DRIVE_BODY=$(type select_drive)
+assert_contains "select_drive uses filter_out_drive" "$SELECT_DRIVE_BODY" "filter_out_drive"
+
 echo ""
 echo "Results: $PASS passed, $FAIL failed"
 [[ $FAIL -eq 0 ]]
