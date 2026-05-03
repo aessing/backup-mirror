@@ -253,7 +253,7 @@ render_run_mode_selection() {
       printf '%s✔%s  Run mode: %sDry run%s — preview changes, nothing is written\n' "$GREEN" "$R" "$YELLOW" "$R"
       ;;
     live)
-      printf '%s✔%s  Run mode: %sLive run%s — mirror home folder for real\n' "$GREEN" "$R" "$ORANGE" "$R"
+      printf '%s✔%s  Run mode: %sLive run%s — mirror folder for real\n' "$GREEN" "$R" "$ORANGE" "$R"
       ;;
   esac
 }
